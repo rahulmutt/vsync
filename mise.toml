@@ -1,0 +1,11 @@
+[tools]
+go = "1.25"
+
+[tasks.build]
+run = "go build -o dist/vsync ./cmd/vsync"
+
+[tasks.test]
+run = "go test ./..."
+
+[tasks.install]
+run = "go install ./cmd/vsync"
