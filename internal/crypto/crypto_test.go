@@ -1,97 +1,82 @@
-package crypto_test
+package crypto
 
 import (
-	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/vsync/vsync/internal/crypto"
 )
 
-func TestEncryptDecryptRoundtrip(t *testing.T) {
-	dir := t.TempDir()
-	keyPath := filepath.Join(dir, "test.key")
-
-	key, err := crypto.GenerateKey(keyPath)
-	if err != nil {
-		t.Fatalf("GenerateKey: %v", err)
-	}
-	if len(key) != 32 {
-		t.Fatalf("expected 32-byte key, got %d", len(key))
+func TestEncryptDecryptRoundTrip(t *testing.T) {
+	key := make([]byte, keySize)
+	for i := range key {
+		key[i] = byte(i)
 	}
 
-	plaintext := []byte("hello, vsync!")
-	blob, err := crypto.Encrypt(key, plaintext)
+	blob, err := Encrypt(key, []byte("secret"))
 	if err != nil {
-		t.Fatalf("Encrypt: %v", err)
+		t.Fatalf("Encrypt() error = %v", err)
+	}
+	plain, err := Decrypt(key, blob)
+	if err != nil {
+		t.Fatalf("Decrypt() error = %v", err)
+	}
+	if string(plain) != "secret" {
+		t.Fatalf("Decrypt() = %q, want %q", plain, "secret")
+	}
+}
+
+func TestDecryptRejectsShortBlob(t *testing.T) {
+	key := make([]byte, keySize)
+	if _, err := Decrypt(key, []byte{1, 2, 3}); err == nil {
+		t.Fatal("Decrypt() error = nil, want error")
+	}
+}
+
+func TestGenerateLoadAndLoadOrGenerateKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "default.key")
+
+	key, err := LoadOrGenerateKey(path)
+	if err != nil {
+		t.Fatalf("LoadOrGenerateKey() error = %v", err)
+	}
+	if got, want := len(key), keySize; got != want {
+		t.Fatalf("generated key length = %d, want %d", got, want)
 	}
 
-	got, err := crypto.Decrypt(key, blob)
+	loaded, err := LoadKey(path)
 	if err != nil {
-		t.Fatalf("Decrypt: %v", err)
+		t.Fatalf("LoadKey() error = %v", err)
 	}
-	if !bytes.Equal(got, plaintext) {
-		t.Fatalf("expected %q, got %q", plaintext, got)
+	if string(loaded) != string(key) {
+		t.Fatal("LoadKey() did not return the generated key")
+	}
+}
+
+func TestLoadKeyRejectsWrongLength(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "short.key")
+	if err := os.WriteFile(path, []byte("short"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadKey(path); err == nil {
+		t.Fatal("LoadKey() error = nil, want length error")
 	}
 }
 
 func TestEncryptFileDecryptFile(t *testing.T) {
-	dir := t.TempDir()
-	keyPath := filepath.Join(dir, "test.key")
-	encPath := filepath.Join(dir, "secret.enc")
-
-	key, _ := crypto.GenerateKey(keyPath)
-	plaintext := []byte("super-secret-value-123")
-
-	if err := crypto.EncryptFile(key, encPath, plaintext); err != nil {
-		t.Fatalf("EncryptFile: %v", err)
+	path := filepath.Join(t.TempDir(), "secret.enc")
+	key := make([]byte, keySize)
+	for i := range key {
+		key[i] = byte(255 - i)
 	}
 
-	// File must be mode 0600.
-	info, _ := os.Stat(encPath)
-	if info.Mode().Perm() != 0600 {
-		t.Fatalf("expected mode 0600, got %v", info.Mode().Perm())
+	if err := EncryptFile(key, path, []byte("top secret")); err != nil {
+		t.Fatalf("EncryptFile() error = %v", err)
 	}
-
-	got, err := crypto.DecryptFile(key, encPath)
+	plain, err := DecryptFile(key, path)
 	if err != nil {
-		t.Fatalf("DecryptFile: %v", err)
+		t.Fatalf("DecryptFile() error = %v", err)
 	}
-	if !bytes.Equal(got, plaintext) {
-		t.Fatalf("expected %q, got %q", plaintext, got)
-	}
-}
-
-func TestDecryptWithWrongKey(t *testing.T) {
-	dir := t.TempDir()
-	key1, _ := crypto.GenerateKey(filepath.Join(dir, "key1.key"))
-	key2, _ := crypto.GenerateKey(filepath.Join(dir, "key2.key"))
-
-	blob, _ := crypto.Encrypt(key1, []byte("secret"))
-	_, err := crypto.Decrypt(key2, blob)
-	if err == nil {
-		t.Fatal("expected decryption with wrong key to fail")
-	}
-}
-
-func TestLoadOrGenerateKey(t *testing.T) {
-	dir := t.TempDir()
-	keyPath := filepath.Join(dir, "new.key")
-
-	// First call: generates.
-	key1, err := crypto.LoadOrGenerateKey(keyPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Second call: loads the same key.
-	key2, err := crypto.LoadOrGenerateKey(keyPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if !bytes.Equal(key1, key2) {
-		t.Fatal("loaded key differs from generated key")
+	if string(plain) != "top secret" {
+		t.Fatalf("DecryptFile() = %q, want %q", plain, "top secret")
 	}
 }

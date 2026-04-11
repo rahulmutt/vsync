@@ -5,8 +5,29 @@ go = "1.26"
 [tasks.build]
 run = "go build -o dist/vsync ./cmd/vsync"
 
-[tasks.test]
+[tasks.test-unit]
 run = "go test ./..."
+
+[tasks.test-integration]
+description = "Start devenv Vault and run integration tests"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+devenv up --detach
+devenv shell -- go test -tags integration ./...
+'''
+
+[tasks.test]
+description = "Run unit tests and devenv-backed integration tests"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+go test ./...
+devenv up --detach
+devenv shell -- go test -tags integration ./...
+'''
 
 [tasks.install]
 run = "go install ./cmd/vsync"
