@@ -1,0 +1,29 @@
+version: 1
+
+# Environment variables used during compilation.
+env:
+  - GO111MODULE=on
+  - CGO_ENABLED=0
+
+# Go build flags.
+flags:
+  - -trimpath
+  - -tags=netgo
+
+# Target platform.
+goos: linux
+goarch: amd64
+
+# Entrypoint.
+main: ./cmd/vsync
+
+# Output binary name (uploaded as a release asset under this name).
+binary: vsync-{{ .Os }}-{{ .Arch }}
+
+# Linker flags — values come from the `evaluated-envs` input in the workflow.
+ldflags:
+  - "-s"
+  - "-w"
+  - "-X main.version={{ .Env.VERSION }}"
+  - "-X main.commit={{ .Env.COMMIT }}"
+  - "-X main.date={{ .Env.COMMIT_DATE }}"

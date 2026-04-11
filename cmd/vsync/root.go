@@ -22,8 +22,9 @@ var globalDirs *state.Dirs
 
 func rootCmd() *cobra.Command {
 	root := &cobra.Command{
-		Use:   "vsync",
-		Short: "Vault-synced shell environment",
+		Use:     "vsync",
+		Short:   "Vault-synced shell environment",
+		Version: fmt.Sprintf("%s (commit %s, built %s)", version, commit, date),
 		Long: `vsync creates an encrypted local cache of Vault credentials and launches a shell
 where configured commands are shimmed to automatically inject secrets from Vault.`,
 		SilenceUsage: true,

@@ -1,38 +1,159 @@
-# This workflow uses actions that are not certified by GitHub.
-# They are provided by a third-party and are governed by
-# separate terms of service, privacy policy, and support
-# documentation.
+# SLSA3-compliant Go release workflow for vsync.
+#
+# Produces provenance-signed binaries for linux/darwin on amd64/arm64 and
+# uploads them (plus their .intoto.jsonl provenance files) to the GitHub
+# release that triggered this workflow. Binaries can be verified end-to-end
+# with https://github.com/slsa-framework/slsa-verifier, e.g.:
+#
+#   slsa-verifier verify-artifact vsync-linux-amd64 \
+#     --provenance-path vsync-linux-amd64.intoto.jsonl \
+#     --source-uri github.com/vsync/vsync \
+#     --source-tag v1.2.3
+#
+# Build configuration lives in .slsa-goreleaser/<os>-<arch>.yml — one file
+# per matrix entry, as required by the Go SLSA builder.
+#
+# References:
+#   - https://github.com/slsa-framework/slsa-github-generator/blob/main/internal/builders/go/README.md
+#   - https://slsa.dev
 
-# This workflow lets you compile your Go project using a SLSA3 compliant builder.
-# This workflow will generate a so-called "provenance" file describing the steps
-# that were performed to generate the final binary.
-# The project is an initiative of the OpenSSF (openssf.org) and is developed at
-# https://github.com/slsa-framework/slsa-github-generator.
-# The provenance file can be verified using https://github.com/slsa-framework/slsa-verifier.
-# For more information about SLSA and how it improves the supply-chain, visit slsa.dev.
+name: Release (SLSA3)
 
-name: SLSA Go releaser
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)build and attach artifacts to (e.g. v1.2.3)"
+        required: true
+        type: string
+  push:
+    tags:
+      - "v*"
   release:
     types: [created]
 
 permissions: read-all
 
-jobs:
-  # ========================================================================================================================================
-  #     Prerequesite: Create a .slsa-goreleaser.yml in the root directory of your project.
-  #       See format in https://github.com/slsa-framework/slsa-github-generator/blob/main/internal/builders/go/README.md#configuration-file
-  #=========================================================================================================================================
-  build:
-    permissions:
-      id-token: write # To sign.
-      contents: write # To upload release assets.
-      actions: read   # To read workflow path.
-    uses: slsa-framework/slsa-github-generator/.github/workflows/builder_go_slsa3.yml@v1.4.0
-    with:
-      go-version: 1.17
-      # =============================================================================================================
-      #     Optional: For more options, see https://github.com/slsa-framework/slsa-github-generator#golang-projects
-      # =============================================================================================================
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
+jobs:
+  # ---------------------------------------------------------------------------
+  # Derive ldflag values (version / commit / commit date / tree state) once so
+  # every matrix build embeds identical metadata.
+  # ---------------------------------------------------------------------------
+  args:
+    name: Compute build metadata
+    runs-on: ubuntu-latest
+    outputs:
+      commit-date: ${{ steps.ldflags.outputs.commit-date }}
+      commit: ${{ steps.ldflags.outputs.commit }}
+      version: ${{ steps.ldflags.outputs.version }}
+      tree-state: ${{ steps.ldflags.outputs.tree-state }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+        with:
+          fetch-depth: 0
+
+      - name: Derive ldflag values
+        id: ldflags
+        run: |
+          set -euo pipefail
+          echo "commit-date=$(git log --date=iso8601-strict -1 --pretty=%ct)" >> "$GITHUB_OUTPUT"
+          echo "commit=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          echo "version=$(git describe --tags --always --dirty | cut -c2-)" >> "$GITHUB_OUTPUT"
+          echo "tree-state=$(if git diff --quiet; then echo clean; else echo dirty; fi)" >> "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------------
+  # Trusted SLSA3 Go builder. One matrix leg per platform we ship.
+  # Each leg loads .slsa-goreleaser/<os>-<arch>.yml, builds the binary, signs
+  # provenance via Sigstore, and (on tag/release) uploads both to the release.
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build ${{ matrix.os }}/${{ matrix.arch }}
+    needs: args
+    permissions:
+      id-token: write # To sign the provenance.
+      contents: write # To upload assets to the release.
+      actions: read   # To read the workflow path (required by the builder).
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [linux, darwin]
+        arch: [amd64, arm64]
+    uses: slsa-framework/slsa-github-generator/.github/workflows/builder_go_slsa3.yml@v2.1.0
+    with:
+      go-version-file: go.mod
+      config-file: .slsa-goreleaser/${{ matrix.os }}-${{ matrix.arch }}.yml
+      evaluated-envs: "COMMIT_DATE:${{ needs.args.outputs.commit-date }}, COMMIT:${{ needs.args.outputs.commit }}, VERSION:${{ needs.args.outputs.version }}, TREE_STATE:${{ needs.args.outputs.tree-state }}"
+      # Upload binaries + .intoto.jsonl provenance to the GitHub release.
+      # For workflow_dispatch runs we target the tag the user supplied.
+      upload-assets: true
+      upload-tag-name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || '' }}
+
+  # ---------------------------------------------------------------------------
+  # After all platform builds finish, download the artifacts, generate a
+  # single SHA256SUMS file, and attach it to the release so consumers can
+  # verify binaries without fetching every provenance file individually.
+  # ---------------------------------------------------------------------------
+  checksums:
+    name: Publish SHA256SUMS
+    needs: build
+    if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Resolve release tag
+        id: tag
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "release" ]; then
+            echo "tag=${{ github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download release binaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cd dist
+          # Retry briefly in case the builder's upload is still settling.
+          for i in 1 2 3 4 5; do
+            if gh release download "$TAG" \
+                 --repo "$GITHUB_REPOSITORY" \
+                 --pattern 'vsync-*' \
+                 --skip-existing; then
+              break
+            fi
+            echo "release download attempt $i failed, retrying in 10s..."
+            sleep 10
+          done
+          ls -la
+
+      - name: Generate SHA256SUMS
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          # Exclude provenance files from the checksum manifest.
+          find . -maxdepth 1 -type f ! -name '*.intoto.jsonl' ! -name 'SHA256SUMS' -printf '%f\n' \
+            | sort \
+            | xargs -r sha256sum > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Upload SHA256SUMS to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          gh release upload "$TAG" dist/SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber

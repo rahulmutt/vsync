@@ -1,0 +1,23 @@
+version: 1
+
+env:
+  - GO111MODULE=on
+  - CGO_ENABLED=0
+
+flags:
+  - -trimpath
+  - -tags=netgo
+
+goos: darwin
+goarch: arm64
+
+main: ./cmd/vsync
+
+binary: vsync-{{ .Os }}-{{ .Arch }}
+
+ldflags:
+  - "-s"
+  - "-w"
+  - "-X main.version={{ .Env.VERSION }}"
+  - "-X main.commit={{ .Env.COMMIT }}"
+  - "-X main.date={{ .Env.COMMIT_DATE }}"
