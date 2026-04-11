@@ -28,12 +28,12 @@ The authoritative design lives in **`SPEC.md`**. When in doubt, defer to `SPEC.m
 | Tool | Purpose | How to install |
 |------|---------|----------------|
 | `mise` | Pins the Go version and exposes task shortcuts | <https://mise.jdx.dev> |
-| Go 1.25 | The only runtime | Installed automatically by `mise install` |
+| Go 1.26 | The only runtime | Installed automatically by `mise install` |
 
 ### First-time setup
 
 ```sh
-mise install          # installs Go 1.25 and any other tools in mise.toml
+mise install          # installs Go 1.26 and any other tools in mise.toml
 go mod download       # fetch all Go dependencies
 mise run build        # produces dist/vsync
 ```

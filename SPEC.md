@@ -21,7 +21,7 @@
 | Encryption | AES-256-GCM via `crypto/aes` + `crypto/rand` | Authenticated encryption, stdlib-only |
 | Config parsing | `gopkg.in/yaml.v3` | Simple, well-supported |
 | Dependency management | Go modules (`go.mod`) |  |
-| Runtime tooling | `mise.toml` | Pins Go version and any helper tools |
+| Runtime tooling | `mise.toml` | Pins Go 1.26 and `slsa-verifier`; defines the build/test/install/verify tasks |
 
 ---
 
@@ -325,7 +325,8 @@ Each cache file at `~/.local/state/vsync/cache/{env,files}/<key>.enc` stores an 
 
 ```toml
 [tools]
-go = "1.22"
+"github:slsa-framework/slsa-verifier" = "2.7.1"
+go = "1.26"
 
 [tasks.build]
 run = "go build -o dist/vsync ./cmd/vsync"
@@ -335,6 +336,8 @@ run = "go test ./..."
 
 [tasks.install]
 run = "go install ./cmd/vsync"
+
+# `verify` downloads a published release and checks its SLSA provenance.
 ```
 
 ---
@@ -380,4 +383,4 @@ vsync/
 8. **`vsync exec`** — secret fetch + `syscall.Exec`.
 9. **`vsync shell`** — sync + shim setup + exec shell.
 10. **`vsync status` / `vsync cache clear`** — observability commands.
-11. **Integration tests** — use a local Vault dev server (`vault server -dev`).
+11. **Integration tests** — use `devenv.nix`, which runs Vault in dev mode with a fixed root token for deterministic tests.
