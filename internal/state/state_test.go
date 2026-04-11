@@ -21,6 +21,15 @@ func TestDefaultDirsUsesHome(t *testing.T) {
 	if got, want := dirs.KeyFile(), filepath.Join(wantBase, "keys", "default.key"); got != want {
 		t.Fatalf("KeyFile() = %q, want %q", got, want)
 	}
+	if got, want := dirs.TokenFile("vault_addr"), filepath.Join(wantBase, "tokens", "vault_addr.enc"); got != want {
+		t.Fatalf("TokenFile() = %q, want %q", got, want)
+	}
+	if got, want := dirs.CacheFile("env", "gemini"), filepath.Join(wantBase, "cache", "env", "gemini.enc"); got != want {
+		t.Fatalf("CacheFile() = %q, want %q", got, want)
+	}
+	if got, want := dirs.ShimFile("pi"), filepath.Join(wantBase, "shims", "pi"); got != want {
+		t.Fatalf("ShimFile() = %q, want %q", got, want)
+	}
 }
 
 func TestEnsureAllCreatesDirectories(t *testing.T) {
@@ -66,5 +75,16 @@ func TestWriteAtomicWritesContentAndMode(t *testing.T) {
 	}
 	if got, want := info.Mode().Perm(), os.FileMode(0600); got != want {
 		t.Fatalf("perm = %v, want %v", got, want)
+	}
+}
+
+func TestWriteAtomicFailsWhenParentPathIsAFile(t *testing.T) {
+	root := t.TempDir()
+	parent := filepath.Join(root, "parent")
+	if err := os.WriteFile(parent, []byte("not a dir"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteAtomic(filepath.Join(parent, "child.txt"), []byte("x"), 0600); err == nil {
+		t.Fatal("WriteAtomic() error = nil, want mkdir failure")
 	}
 }

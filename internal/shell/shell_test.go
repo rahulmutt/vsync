@@ -1,8 +1,10 @@
 package shell
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -29,6 +31,88 @@ func TestBuildEnvPrependsShimDirAndSetsVsyncVars(t *testing.T) {
 	}
 	if !strings.Contains(got, "VSYNC_KEY=/tmp/key") {
 		t.Fatalf("VSYNC_KEY not set: %v", env)
+	}
+}
+
+func TestLaunchRejectsNestedShellAndMissingBinary(t *testing.T) {
+	t.Setenv("VSYNC_ACTIVE", "1")
+	if err := Launch("/bin/sh", "/tmp/shims", "/tmp/key"); err == nil {
+		t.Fatal("Launch() error = nil, want nested shell error")
+	}
+	t.Setenv("VSYNC_ACTIVE", "")
+	if err := Launch("/definitely/not-a-shell", "/tmp/shims", "/tmp/key"); err == nil {
+		t.Fatal("Launch() error = nil, want shell not found error")
+	}
+}
+
+func TestLaunchBuildsEnvAndCallsExec(t *testing.T) {
+	t.Setenv("PATH", "/usr/bin:/bin")
+	oldLookPath, oldExec := lookPathFn, syscallExecFn
+	defer func() {
+		lookPathFn = oldLookPath
+		syscallExecFn = oldExec
+	}()
+
+	lookPathFn = func(file string) (string, error) {
+		if file != "sh" {
+			t.Fatalf("LookPath file = %q, want sh", file)
+		}
+		return "/bin/sh", nil
+	}
+	var gotPath string
+	var gotArgv []string
+	var gotEnv []string
+	syscallExecFn = func(path string, argv []string, env []string) error {
+		gotPath = path
+		gotArgv = append([]string(nil), argv...)
+		gotEnv = append([]string(nil), env...)
+		return errors.New("exec stub")
+	}
+
+	if err := Launch("sh", "/tmp/shims", "/tmp/key"); err == nil || err.Error() != "exec stub" {
+		t.Fatalf("Launch() error = %v, want exec stub", err)
+	}
+	if gotPath != "/bin/sh" {
+		t.Fatalf("exec path = %q, want /bin/sh", gotPath)
+	}
+	if !reflect.DeepEqual(gotArgv, []string{"sh"}) {
+		t.Fatalf("argv = %#v, want [sh]", gotArgv)
+	}
+	joined := strings.Join(gotEnv, "\n")
+	if !strings.Contains(joined, "PATH=/tmp/shims"+string(filepath.ListSeparator)+"/usr/bin:/bin") {
+		t.Fatalf("PATH not prepended: %v", gotEnv)
+	}
+	if !strings.Contains(joined, "VSYNC_ACTIVE=1") || !strings.Contains(joined, "VSYNC_KEY=/tmp/key") {
+		t.Fatalf("env missing vsync vars: %v", gotEnv)
+	}
+}
+
+func TestExecCommandMissingBinaryAndMergesEnv(t *testing.T) {
+	t.Setenv("PATH", "/usr/bin")
+	oldExec := syscallExecFn
+	defer func() { syscallExecFn = oldExec }()
+
+	var gotPath string
+	var gotArgv []string
+	var gotEnv []string
+	syscallExecFn = func(path string, argv []string, env []string) error {
+		gotPath = path
+		gotArgv = append([]string(nil), argv...)
+		gotEnv = append([]string(nil), env...)
+		return errors.New("exec stub")
+	}
+	if err := ExecCommand("ls", []string{"-l"}, map[string]string{"A": "1", "B": "2"}, "/tmp/shims"); err == nil || err.Error() != "exec stub" {
+		t.Fatalf("ExecCommand() error = %v, want exec stub", err)
+	}
+	if gotPath != "/usr/bin/ls" {
+		t.Fatalf("exec path = %q, want /usr/bin/ls", gotPath)
+	}
+	if !reflect.DeepEqual(gotArgv, []string{"ls", "-l"}) {
+		t.Fatalf("argv = %#v, want [ls -l]", gotArgv)
+	}
+	joined := strings.Join(gotEnv, "\n")
+	if !strings.Contains(joined, "A=1") || !strings.Contains(joined, "B=2") {
+		t.Fatalf("extra env not merged: %v", gotEnv)
 	}
 }
 

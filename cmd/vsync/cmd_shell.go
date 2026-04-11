@@ -11,6 +11,8 @@ import (
 	vlt "github.com/vsync/vsync/internal/vault"
 )
 
+var shellLaunchFn = shell.Launch
+
 func shellCmd() *cobra.Command {
 	var shellBin string
 
@@ -79,7 +81,7 @@ exec's into a new shell with the shims directory prepended to PATH.`,
 			}
 
 			fmt.Printf("vsync: launching %s with %d shim(s)\n", shellBin, len(commandNames))
-			return shell.Launch(shellBin, dirs.Shims, keyPath)
+			return shellLaunchFn(shellBin, dirs.Shims, keyPath)
 		},
 	}
 

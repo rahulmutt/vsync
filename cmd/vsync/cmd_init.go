@@ -14,6 +14,18 @@ import (
 	"golang.org/x/term"
 )
 
+var (
+	defaultDirsFn       = state.DefaultDirs
+	generateKeyFn       = crypto.GenerateKey
+	loadOrGenerateKeyFn = crypto.LoadOrGenerateKey
+	loadKeyFn           = crypto.LoadKey
+	storeCredentialsFn  = vlt.StoreCredentials
+	newClientFn         = vlt.NewClient
+	resolveVaultAddrFn  = resolveVaultAddr
+	resolveVaultTokenFn = resolveVaultToken
+	promptFn            = prompt
+)
+
 func initCmd() *cobra.Command {
 	var rotateKey bool
 
@@ -24,7 +36,7 @@ func initCmd() *cobra.Command {
 Vault address and token encrypted on disk so vsync can connect to Vault
 without exposing credentials in plain text.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			dirs, err := state.DefaultDirs()
+			dirs, err := defaultDirsFn()
 			if err != nil {
 				return err
 			}
@@ -41,23 +53,23 @@ without exposing credentials in plain text.`,
 			// Generate or rotate key.
 			if rotateKey {
 				fmt.Println("vsync: rotating encryption key…")
-				if _, err := crypto.GenerateKey(keyPath); err != nil {
+				if _, err := generateKeyFn(keyPath); err != nil {
 					return err
 				}
 			} else {
-				if _, err := crypto.LoadOrGenerateKey(keyPath); err != nil {
+				if _, err := loadOrGenerateKeyFn(keyPath); err != nil {
 					return err
 				}
 			}
-			key, err := crypto.LoadKey(keyPath)
+			key, err := loadKeyFn(keyPath)
 			if err != nil {
 				return err
 			}
 
 			// Resolve Vault address.
-			addr := resolveVaultAddr()
+			addr := resolveVaultAddrFn()
 			if addr == "" {
-				addr, err = prompt("Vault address (VAULT_ADDR): ", false)
+				addr, err = promptFn("Vault address (VAULT_ADDR): ", false)
 				if err != nil {
 					return err
 				}
@@ -68,9 +80,9 @@ without exposing credentials in plain text.`,
 			}
 
 			// Resolve Vault token.
-			token := resolveVaultToken()
+			token := resolveVaultTokenFn()
 			if token == "" {
-				token, err = prompt("Vault token (VAULT_TOKEN): ", true)
+				token, err = promptFn("Vault token (VAULT_TOKEN): ", true)
 				if err != nil {
 					return err
 				}
@@ -81,14 +93,14 @@ without exposing credentials in plain text.`,
 			}
 
 			// Store encrypted.
-			if err := vlt.StoreCredentials(dirs, key, addr, token); err != nil {
+			if err := storeCredentialsFn(dirs, key, addr, token); err != nil {
 				return err
 			}
 
 			// Verify connectivity.
 			fmt.Print("vsync: verifying vault connectivity… ")
 			creds := &vlt.Credentials{Addr: addr, Token: token}
-			client, err := vlt.NewClient(creds, 2)
+			client, err := newClientFn(creds, 2)
 			if err != nil {
 				fmt.Println("✗")
 				return fmt.Errorf("create vault client: %w", err)

@@ -67,6 +67,19 @@ func TestLoadOrEmptyMissingFile(t *testing.T) {
 	}
 }
 
+func TestDefaultConfigPathUsesHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	got, err := DefaultConfigPath()
+	if err != nil {
+		t.Fatalf("DefaultConfigPath() error = %v", err)
+	}
+	want := filepath.Join(home, ".config", "vsync", "config.yaml")
+	if got != want {
+		t.Fatalf("DefaultConfigPath() = %q, want %q", got, want)
+	}
+}
+
 func TestFindCommand(t *testing.T) {
 	cfg := &Config{Env: EnvConfig{Commands: []CommandEntry{{Name: "pi"}, {Name: "code"}}}}
 	if got := cfg.FindCommand("code"); got == nil || got.Name != "code" {
@@ -74,6 +87,28 @@ func TestFindCommand(t *testing.T) {
 	}
 	if got := cfg.FindCommand("missing"); got != nil {
 		t.Fatalf("FindCommand(missing) = %#v, want nil", got)
+	}
+}
+
+func TestExpandPathsHandlesTildeAndLeavesOtherPaths(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	cfg := &Config{Files: []FileEntry{{Path: "~", Key: "root"}, {Path: "~/notes.txt", Key: "notes"}, {Path: "relative.txt", Key: "rel"}, {Path: "/abs.txt", Key: "abs"}}}
+	if err := cfg.ExpandPaths(); err != nil {
+		t.Fatalf("ExpandPaths() error = %v", err)
+	}
+	if got, want := cfg.Files[0].Path, home; got != want {
+		t.Fatalf("ExpandPaths(~) = %q, want %q", got, want)
+	}
+	if got, want := cfg.Files[1].Path, filepath.Join(home, "notes.txt"); got != want {
+		t.Fatalf("ExpandPaths(~/*) = %q, want %q", got, want)
+	}
+	if got, want := cfg.Files[2].Path, "relative.txt"; got != want {
+		t.Fatalf("ExpandPaths(relative) = %q, want %q", got, want)
+	}
+	if got, want := cfg.Files[3].Path, "/abs.txt"; got != want {
+		t.Fatalf("ExpandPaths(abs) = %q, want %q", got, want)
 	}
 }
 

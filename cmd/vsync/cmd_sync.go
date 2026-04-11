@@ -57,7 +57,6 @@ func syncCmd() *cobra.Command {
 
 			synced, skipped := 0, 0
 			for _, f := range entries {
-				// Check cache unless --force.
 				if !force {
 					entry, _ := vlt.ReadCache(dirs, key, "files", f.Key)
 					if entry != nil && !entry.IsExpired() {
@@ -66,11 +65,25 @@ func syncCmd() *cobra.Command {
 						continue
 					}
 				}
-				content, err := vlt.GetCachedFileSecret(dirs, key, client, cfg.Vault.FilesPrefix, f.Key)
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "vsync: error fetching %s: %v\n", f.Key, err)
-					continue
+
+				var content string
+				if force {
+					result, err := client.GetFileSecret(cfg.Vault.FilesPrefix, f.Key)
+					if err != nil {
+						fmt.Fprintf(os.Stderr, "vsync: error fetching %s: %v\n", f.Key, err)
+						continue
+					}
+					content = result.Value
+					_ = vlt.WriteCache(dirs, key, "files", f.Key, &vlt.CacheEntry{Value: content, VaultPath: cfg.Vault.FilesPrefix + "/" + f.Key})
+				} else {
+					var err error
+					content, err = vlt.GetCachedFileSecret(dirs, key, client, cfg.Vault.FilesPrefix, f.Key)
+					if err != nil {
+						fmt.Fprintf(os.Stderr, "vsync: error fetching %s: %v\n", f.Key, err)
+						continue
+					}
 				}
+
 				if err := writeFile(f.Path, f.Mode, []byte(content)); err != nil {
 					fmt.Fprintf(os.Stderr, "vsync: error writing %s: %v\n", f.Path, err)
 					continue

@@ -24,6 +24,9 @@ func TestEnsureListAndRemove(t *testing.T) {
 	if err := Ensure(dirs, []string{"pi", "code"}); err != nil {
 		t.Fatalf("Ensure() error = %v", err)
 	}
+	if err := os.Mkdir(filepath.Join(dirs.Shims, "nested"), 0700); err != nil {
+		t.Fatalf("mkdir nested shim dir: %v", err)
+	}
 
 	for _, name := range []string{"pi", "code"} {
 		path := dirs.ShimFile(name)
@@ -51,11 +54,21 @@ func TestEnsureListAndRemove(t *testing.T) {
 	if len(names) != 2 {
 		t.Fatalf("List() len = %d, want 2", len(names))
 	}
+	seen := map[string]bool{}
+	for _, name := range names {
+		seen[name] = true
+	}
+	if !seen["pi"] || !seen["code"] {
+		t.Fatalf("List() = %#v, want pi and code", names)
+	}
 
 	if err := Remove(dirs, "pi"); err != nil {
 		t.Fatalf("Remove() error = %v", err)
 	}
 	if _, err := os.Stat(dirs.ShimFile("pi")); !os.IsNotExist(err) {
 		t.Fatalf("shim still exists after Remove; err=%v", err)
+	}
+	if err := Remove(dirs, "missing"); err != nil {
+		t.Fatalf("Remove() missing error = %v", err)
 	}
 }

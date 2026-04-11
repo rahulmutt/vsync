@@ -10,6 +10,11 @@ import (
 	"syscall"
 )
 
+var (
+	lookPathFn    = exec.LookPath
+	syscallExecFn = syscall.Exec
+)
+
 // Launch execs into the given shell binary with the augmented environment.
 // shimDir is prepended to PATH; keyFile path is exported as VSYNC_KEY.
 func Launch(shellBin, shimDir, keyFile string) error {
@@ -20,12 +25,12 @@ func Launch(shellBin, shimDir, keyFile string) error {
 	env := buildEnv(shimDir, keyFile)
 	argv := []string{shellBin}
 
-	shellPath, err := exec.LookPath(shellBin)
+	shellPath, err := lookPathFn(shellBin)
 	if err != nil {
 		return fmt.Errorf("shell not found: %s: %w", shellBin, err)
 	}
 
-	return syscall.Exec(shellPath, argv, env)
+	return syscallExecFn(shellPath, argv, env)
 }
 
 // ExecCommand finds the real binary for name (skipping shimDir), then syscall.Exec's it
@@ -42,7 +47,7 @@ func ExecCommand(name string, args []string, extraEnv map[string]string, shimDir
 	}
 
 	argv := append([]string{name}, args...)
-	return syscall.Exec(realPath, argv, env)
+	return syscallExecFn(realPath, argv, env)
 }
 
 // findReal locates the binary for name in PATH, skipping shimDir.
