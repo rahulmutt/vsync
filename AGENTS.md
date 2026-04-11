@@ -66,6 +66,9 @@ vsync/
 │       ├── client.go       # Vault connection, KV v1/v2 GET
 │       └── cache.go        # read/write encrypted cache entries
 ├── dist/                   # build output (gitignored)
+├── .github/workflows/      # SLSA3 release pipeline (see §15)
+├── .slsa-goreleaser/       # per-platform build configs used by the SLSA builder
+├── devenv.nix              # local Vault dev server for integration tests (see §11)
 ├── go.mod / go.sum
 ├── mise.toml               # Go version pin + task definitions
 ├── SPEC.md                 # canonical design spec
@@ -278,10 +281,47 @@ go test -run TestFoo ./internal/crypto/  # run a specific test
 ```
 
 - Use `t.TempDir()` for temporary files (auto-cleaned).
-- Tests should not require a live Vault server. Mock Vault responses or test only the
-  crypto/state/config layers directly.
+- Unit tests should not require a live Vault server. Mock Vault responses or test only
+  the crypto/state/config layers directly.
 - For integration tests that need Vault, gate them with `t.Skip()` unless
   `VAULT_ADDR` and `VAULT_TOKEN` are set in the environment.
+
+### Integration testing with `devenv.nix`
+
+The repo ships a `devenv.nix` that runs a local HashiCorp Vault **dev-mode** server
+with a fixed, well-known root token so integration tests are fully deterministic.
+Dev mode keeps all state in memory, so every `devenv up` starts from a clean slate.
+
+| Knob | Value | Notes |
+|------|-------|-------|
+| `VAULT_ADDR`  | `http://127.0.0.1:8200` | Auto-exported into `devenv shell` and all child processes. |
+| `VAULT_TOKEN` | `vsync-dev-root-token`  | Fixed root token, safe only because dev mode is ephemeral. |
+| KV mount      | `secret/` (KV v2)       | Dev mode enables this automatically. |
+
+Typical loop:
+
+```sh
+devenv up           # foreground: starts `vault server -dev` via process-compose
+# in another terminal
+devenv shell        # VAULT_ADDR / VAULT_TOKEN already in env
+seed-vault          # seeds secret/vsync/env/* and secret/vsync/files/* samples
+go test ./...       # integration tests pick up VAULT_ADDR / VAULT_TOKEN
+```
+
+Implementation notes for agents modifying `devenv.nix`:
+
+- We deliberately **do not** use `services.vault.enable = true`. The upstream devenv
+  module runs a *production-style* server with file storage and manual init/unseal,
+  which is the wrong shape for tests. We use a plain `processes.vault` entry that
+  execs `vault server -dev -dev-root-token-id=... -dev-listen-address=...`.
+- A process-compose `readiness_probe` runs `vault status` so `devenv up --detach`
+  waits until Vault is actually accepting requests.
+- The `seed-vault` script writes sample secrets under the default prefixes from
+  `internal/config` (`secret/vsync/env/*`, `secret/vsync/files/*`). Keep it in sync
+  if those defaults ever change.
+- Go itself is **not** pinned in `devenv.nix` — `mise.toml` owns the toolchain.
+  Don't duplicate the Go version there.
+- Never reuse `vsync-dev-root-token` or any other dev-mode token outside of tests.
 
 ---
 
@@ -329,3 +369,76 @@ pi ...
 | `VSYNC_CONFIG` | User | `root.go` (config path override) |
 | `VSYNC_KEY` | `vsync shell` at launch | Shims → `vsync exec` to locate the key file |
 | `VSYNC_ACTIVE` | `vsync shell` at launch | Prevents nested shell invocations |
+| `VAULT_DEV_ROOT_TOKEN_ID` | `devenv.nix` | Consumed by `vault server -dev` in the integration test environment |
+| `VAULT_DEV_LISTEN_ADDRESS` | `devenv.nix` | Consumed by `vault server -dev` in the integration test environment |
+
+---
+
+## 15. Release Process
+
+Releases are produced by the **SLSA3 Go builder** via
+`.github/workflows/go-ossf-slsa3-publish.yml`. Every release ships:
+
+- Four binaries — `vsync-{linux,darwin}-{amd64,arm64}` — built with `-trimpath`,
+  `CGO_ENABLED=0`, and version metadata injected via `-ldflags -X main.version=...`.
+- A matching `.intoto.jsonl` Sigstore-signed provenance file per binary.
+- A single `SHA256SUMS` manifest covering all binaries (provenance files excluded).
+
+Per-platform build inputs live in `.slsa-goreleaser/<os>-<arch>.yml`. The workflow's
+`args` job computes `VERSION`, `COMMIT`, `COMMIT_DATE`, and `TREE_STATE` once and
+passes them to every matrix leg via `evaluated-envs`, so every binary in a release
+embeds identical metadata.
+
+### Cutting a release
+
+1. Make sure `main` is green and `mise run build && mise run test` pass locally.
+2. Tag the commit with a `v`-prefixed semver tag and push it:
+   ```sh
+   git tag -s v0.2.0 -m "vsync v0.2.0"
+   git push origin v0.2.0
+   ```
+   Pushing a `v*` tag triggers the workflow automatically. Creating a GitHub
+   Release from that tag (`release: created`) also triggers it. As a fallback,
+   `workflow_dispatch` accepts an existing tag as input for re-runs.
+3. Wait for all four `build` matrix legs to finish. They upload binaries and
+   `.intoto.jsonl` files directly to the release.
+4. The `checksums` job then downloads all `vsync-*` assets, generates
+   `SHA256SUMS`, and uploads it to the same release (with `--clobber`, so re-runs
+   are idempotent).
+
+### Verifying a published release
+
+Use the pinned `slsa-verifier` from `mise.toml`:
+
+```sh
+mise run verify -- v0.2.0              # host os/arch
+mise run verify -- v0.2.0 linux-amd64   # explicit platform
+```
+
+The task derives the source URI from `git remote get-url origin`, so it works on
+forks without edits. Under the hood it runs:
+
+```sh
+slsa-verifier verify-artifact vsync-<os>-<arch> \
+  --provenance-path vsync-<os>-<arch>.intoto.jsonl \
+  --source-uri github.com/<owner>/<repo> \
+  --source-tag v0.2.0
+```
+
+### Guidelines for agents touching the release pipeline
+
+- **Do not** edit `.slsa-goreleaser/*.yml` and the workflow independently — the
+  matrix in `go-ossf-slsa3-publish.yml` must match the set of config files 1:1.
+  Adding a new platform means a new `.slsa-goreleaser/<os>-<arch>.yml` **and** a
+  new matrix entry.
+- Keep `main: ./cmd/vsync` and the `binary: vsync-{{ .Os }}-{{ .Arch }}` naming
+  in sync across all four configs. The `checksums` job globs on `vsync-*`, and
+  `mise run verify` expects that exact naming.
+- Don't bump the trusted builder ref
+  (`slsa-framework/slsa-github-generator/.github/workflows/builder_go_slsa3.yml@v2.1.0`)
+  without also bumping the corresponding `slsa-verifier` pin in `mise.toml`.
+- Version metadata is read from `git describe --tags --always --dirty`. Keep
+  `main.version`, `main.commit`, and `main.date` as package-level vars in
+  `cmd/vsync/main.go` so the `-ldflags -X` injections keep working.
+- Never add build steps that require network access beyond `go mod download` —
+  the SLSA3 builder runs in a locked-down environment and will fail otherwise.
