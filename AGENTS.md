@@ -61,7 +61,7 @@ vsync/
 │   ├── crypto/             # AES-256-GCM key gen, encrypt, decrypt; unit-tested
 │   ├── shell/shell.go      # build augmented env, syscall.Exec into shell or command
 │   ├── shim/shim.go        # write/remove #!/bin/sh shim scripts
-│   ├── state/state.go      # path helpers for ~/.local/state/vsync/*; atomic writes
+│   ├── state/state.go      # path helpers for resolved vsync state paths; atomic writes
 │   └── vault/
 │       ├── client.go       # Vault connection, KV v1/v2 GET
 │       └── cache.go        # read/write encrypted cache entries
@@ -97,15 +97,15 @@ All day-to-day operations go through `mise run <task>`:
 
 ### `internal/state`
 
-Owns **all paths** under `~/.local/state/vsync/`. Never hard-code those paths elsewhere.
+Owns **all paths** under the resolved vsync state directory (`VSYNC_STATE_DIR`, `XDG_STATE_DIR/vsync`, or fallback `~/.local/state/vsync`). Never hard-code those paths elsewhere.
 
 Key API:
 ```go
 dirs, _ := state.DefaultDirs()
-dirs.KeyFile()              // ~/.local/state/vsync/keys/default.key
-dirs.TokenFile("vault_addr") // ~/.local/state/vsync/tokens/vault_addr.enc
-dirs.CacheFile("env", "gemini-api-key") // .../cache/env/gemini-api-key.enc
-dirs.ShimFile("pi")         // ~/.local/state/vsync/shims/pi
+dirs.KeyFile()              // <state dir>/keys/default.key
+dirs.TokenFile("vault_addr") // <state dir>/tokens/vault_addr.enc
+dirs.CacheFile("env", "gemini-api-key") // <state dir>/cache/env/gemini-api-key.enc
+dirs.ShimFile("pi")         // <state dir>/shims/pi
 dirs.EnsureAll()            // create all directories (mode 0700)
 state.WriteAtomic(path, data, 0600) // write to tmp then rename
 ```
@@ -350,7 +350,7 @@ pi ...
 
 | Pitfall | What to do instead |
 |---------|-------------------|
-| Hard-coding `~/.local/state/vsync` paths | Use `state.Dirs` methods |
+| Hard-coding resolved vsync state paths | Use `state.Dirs` methods |
 | Implementing encryption outside `internal/crypto` | Call `crypto.Encrypt` / `crypto.Decrypt` |
 | Using `os.WriteFile` for secrets | Use `state.WriteAtomic` with mode `0600` |
 | Printing a secret value (even in debug output) | Redact: `"[REDACTED]"` |
@@ -367,6 +367,8 @@ pi ...
 | `VAULT_ADDR` | User / CI | `cmd_init`, `root.go` resolver |
 | `VAULT_TOKEN` | User / CI | `cmd_init`, `root.go` resolver |
 | `VSYNC_CONFIG` | User | `root.go` (config path override) |
+| `VSYNC_STATE_DIR` | User / CI | `internal/state.DefaultDirs` full override for the vsync state directory |
+| `XDG_STATE_DIR` | User / CI | `internal/state.DefaultDirs` parent for the vsync state directory (`$XDG_STATE_DIR/vsync`) |
 | `VSYNC_KEY` | `vsync shell` at launch | Shims → `vsync exec` to locate the key file |
 | `VSYNC_ACTIVE` | `vsync shell` at launch | Prevents nested shell invocations |
 | `VAULT_DEV_ROOT_TOKEN_ID` | `devenv.nix` | Consumed by `vault server -dev` in the integration test environment |

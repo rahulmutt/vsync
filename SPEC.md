@@ -27,11 +27,18 @@
 
 ## Directory Layout
 
+The vsync state directory is resolved in this order:
+1. `VSYNC_STATE_DIR` if set (full override)
+2. `XDG_STATE_DIR/vsync` if `XDG_STATE_DIR` is set
+3. `~/.local/state/vsync` as the fallback
+
+All paths below refer to that resolved state directory.
+
 ```
 ~/.config/vsync/
   config.yaml                  # user configuration (see below)
 
-~/.local/state/vsync/
+<state dir>/
   keys/
     default.key                # 32-byte random AES-256 key (0600)
   tokens/
@@ -117,7 +124,7 @@ vsync [command] [flags]
 | `--vault-addr` | `VAULT_ADDR` | Vault server address |
 | `--vault-token` | `VAULT_TOKEN` | Vault token |
 | `--config` | `VSYNC_CONFIG` | Path to config file (default: `~/.config/vsync/config.yaml`) |
-| `--key` | `VSYNC_KEY` | Path to encryption key file (default: `~/.local/state/vsync/keys/default.key`) |
+| `--key` | `VSYNC_KEY` | Path to encryption key file (default: `<state dir>/keys/default.key`) |
 
 Flags take precedence over environment variables; environment variables take precedence over stored/encrypted values.
 
@@ -133,13 +140,13 @@ vsync init [--vault-addr ADDR] [--vault-token TOKEN] [--rotate-key]
 
 **Steps:**
 
-1. If `~/.local/state/vsync/keys/default.key` does not exist (or `--rotate-key` is passed):
+1. If `<state dir>/keys/default.key` does not exist (or `--rotate-key` is passed):
    - Generate 32 cryptographically random bytes via `crypto/rand`.
    - Write to key file with mode `0600`. Create parent dirs as needed.
 2. Resolve `VAULT_ADDR` and `VAULT_TOKEN` (flag → env → prompt if missing).
 3. Encrypt each value with AES-256-GCM using the key and write to:
-   - `~/.local/state/vsync/tokens/vault_addr.enc`
-   - `~/.local/state/vsync/tokens/vault_token.enc`
+   - `<state dir>/tokens/vault_addr.enc`
+   - `<state dir>/tokens/vault_token.enc`
 4. Verify connectivity: attempt a `vault.Auth().LookupSelf()` call.
 5. Print confirmation; warn if the token has a short TTL.
 
@@ -158,10 +165,10 @@ vsync shell [--shell /bin/zsh]
 1. Load and decrypt Vault credentials (or use flag/env overrides).
 2. Read `~/.config/vsync/config.yaml`.
 3. Sync all `files` entries (see **File Sync** below).
-4. Build shims (see **Shim Mechanism** below) in `~/.local/state/vsync/shims/`.
+4. Build shims (see **Shim Mechanism** below) in `<state dir>/shims/`.
 5. Construct child environment:
    - Copy current `os.Environ()`.
-   - Prepend `~/.local/state/vsync/shims` to `PATH`.
+   - Prepend `<state dir>/shims` to `PATH`.
    - Set `VSYNC_ACTIVE=1` (prevents nested `vsync shell` calls).
    - Set `VSYNC_KEY` to the key file path so shims can locate it.
 6. Detect shell from `--shell` flag → `$SHELL` → `/bin/sh`.
@@ -183,10 +190,10 @@ vsync exec <command> [args...]
 
 1. Load config; find the matching `env.commands` entry for `<command>`.
 2. For each `variable` in that entry:
-   a. Check encrypted cache (`~/.local/state/vsync/cache/env/<key>.enc`); use cached value if not expired.
+   a. Check encrypted cache (`<state dir>/cache/env/<key>.enc`); use cached value if not expired.
    b. Otherwise decrypt Vault credentials, connect, fetch secret from `<env_prefix>/<key>`, cache result.
 3. Build env: copy `os.Environ()`, add/override fetched variables.
-4. Find the real binary: search `PATH` **skipping** `~/.local/state/vsync/shims` to avoid re-entering the shim.
+4. Find the real binary: search `PATH` **skipping** `<state dir>/shims` to avoid re-entering the shim.
 5. `syscall.Exec` into the real binary with the augmented environment.
 
 ---
@@ -241,7 +248,7 @@ Removes cached secret entries to force re-fetch on next use.
 
 ## Shim Mechanism
 
-Shims are **small standalone executables** placed in `~/.local/state/vsync/shims/`. They are generated once by `vsync shell` (recreated if config changes, detected via a hash of the relevant config section).
+Shims are **small standalone executables** placed in `<state dir>/shims/`. They are generated once by `vsync shell` (recreated if config changes, detected via a hash of the relevant config section).
 
 Each shim is a minimal Go-compiled binary (or a portable shell script as fallback) that simply calls:
 
@@ -286,7 +293,7 @@ All `.enc` files contain the raw binary blob (nonce + ciphertext). Files are wri
 
 ## Cache Format
 
-Each cache file at `~/.local/state/vsync/cache/{env,files}/<key>.enc` stores an encrypted JSON blob:
+Each cache file at `<state dir>/cache/{env,files}/<key>.enc` stores an encrypted JSON blob:
 
 ```json
 {
@@ -362,7 +369,7 @@ vsync/
     shell/
       shell.go                 # build env, exec into shell
     state/
-      state.go                 # manage ~/.local/state/vsync/* paths
+      state.go                 # manage resolved vsync state paths
   go.mod
   go.sum
   mise.toml

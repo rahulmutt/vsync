@@ -12,13 +12,13 @@ import (
 )
 
 var (
-	shellLaunchFn   = shell.Launch
-	loadConfigFn    = config.LoadOrEmpty
-	expandPathsFn   = func(cfg *config.Config) error { return cfg.ExpandPaths() }
-	ensureShimsFn   = shim.Ensure
-	loadCredsFn     = vlt.LoadCredentials
+	shellLaunchFn    = shell.Launch
+	loadConfigFn     = config.LoadOrEmpty
+	expandPathsFn    = func(cfg *config.Config) error { return cfg.ExpandPaths() }
+	ensureShimsFn    = shim.Ensure
+	loadCredsFn      = vlt.LoadCredentials
 	newVaultClientFn = vlt.NewClient
-	syncFilesFn     = syncFiles
+	syncFilesFn      = syncFiles
 )
 
 func shellCmd() *cobra.Command {

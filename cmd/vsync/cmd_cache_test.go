@@ -14,6 +14,9 @@ func setupCacheTest(t *testing.T) (*state.Dirs, []byte) {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("VAULT_ADDR", "")
+	t.Setenv("VAULT_TOKEN", "")
+	t.Setenv("VSYNC_KEY", "")
 
 	dirs, err := state.DefaultDirs()
 	if err != nil {

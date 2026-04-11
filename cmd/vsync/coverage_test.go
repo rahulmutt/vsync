@@ -853,6 +853,8 @@ func TestShellSyncSyncAndCacheBranches(t *testing.T) {
 func TestInitCmdEnsureAllAndPromptErrors(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("VAULT_ADDR", "")
+	t.Setenv("VAULT_TOKEN", "")
 
 	badBase := t.TempDir()
 	badDirs := &state.Dirs{Base: badBase, Keys: filepath.Join(badBase, "keys"), Tokens: filepath.Join(badBase, "tokens"), Cache: filepath.Join(badBase, "cache"), Shims: filepath.Join(badBase, "shims")}

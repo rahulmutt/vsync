@@ -19,6 +19,9 @@ func setupInitTest(t *testing.T) (*state.Dirs, string) {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("VAULT_ADDR", "")
+	t.Setenv("VAULT_TOKEN", "")
+	t.Setenv("VSYNC_KEY", "")
 
 	dirs, err := defaultDirsFn()
 	if err != nil {

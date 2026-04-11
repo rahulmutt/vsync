@@ -10,6 +10,8 @@ import (
 func TestDefaultDirsUsesHome(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("XDG_STATE_DIR", "")
+	t.Setenv("VSYNC_STATE_DIR", "")
 
 	dirs, err := DefaultDirs()
 	if err != nil {
@@ -30,6 +32,43 @@ func TestDefaultDirsUsesHome(t *testing.T) {
 	}
 	if got, want := dirs.ShimFile("pi"), filepath.Join(wantBase, "shims", "pi"); got != want {
 		t.Fatalf("ShimFile() = %q, want %q", got, want)
+	}
+}
+
+func TestDefaultDirsUsesXDGStateDir(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	xdgStateDir := filepath.Join(t.TempDir(), "state")
+	t.Setenv("XDG_STATE_DIR", xdgStateDir)
+	t.Setenv("VSYNC_STATE_DIR", "")
+
+	dirs, err := DefaultDirs()
+	if err != nil {
+		t.Fatalf("DefaultDirs() error = %v", err)
+	}
+	wantBase := filepath.Join(xdgStateDir, "vsync")
+	if dirs.Base != wantBase {
+		t.Fatalf("Base = %q, want %q", dirs.Base, wantBase)
+	}
+	if got, want := dirs.KeyFile(), filepath.Join(wantBase, "keys", "default.key"); got != want {
+		t.Fatalf("KeyFile() = %q, want %q", got, want)
+	}
+}
+
+func TestDefaultDirsUsesVsyncStateDirOverride(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_STATE_DIR", filepath.Join(t.TempDir(), "xdg-state"))
+	vsyncStateDir := filepath.Join(t.TempDir(), "custom-vsync-state")
+	t.Setenv("VSYNC_STATE_DIR", vsyncStateDir)
+
+	dirs, err := DefaultDirs()
+	if err != nil {
+		t.Fatalf("DefaultDirs() error = %v", err)
+	}
+	if dirs.Base != vsyncStateDir {
+		t.Fatalf("Base = %q, want %q", dirs.Base, vsyncStateDir)
+	}
+	if got, want := dirs.CacheFile("env", "gemini"), filepath.Join(vsyncStateDir, "cache", "env", "gemini.enc"); got != want {
+		t.Fatalf("CacheFile() = %q, want %q", got, want)
 	}
 }
 
@@ -88,6 +127,8 @@ func TestWriteAtomicWritesContentAndMode(t *testing.T) {
 }
 
 func TestDefaultDirsAndWriteAtomicErrorPaths(t *testing.T) {
+	t.Setenv("XDG_STATE_DIR", "")
+	t.Setenv("VSYNC_STATE_DIR", "")
 	origHome := userHomeDirFn
 	userHomeDirFn = func() (string, error) { return "", errors.New("no home") }
 	defer func() { userHomeDirFn = origHome }()

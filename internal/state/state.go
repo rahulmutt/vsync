@@ -1,4 +1,4 @@
-// Package state manages ~/.local/state/vsync/* path helpers and atomic file I/O.
+// Package state manages state path helpers and atomic file I/O.
 package state
 
 import (
@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 )
 
-// Dirs holds the canonical paths under ~/.local/state/vsync.
+// Dirs holds the canonical paths under the vsync state directory.
 type Dirs struct {
-	Base   string // ~/.local/state/vsync
+	Base   string // ~/.local/state/vsync, $XDG_STATE_DIR/vsync, or $VSYNC_STATE_DIR
 	Keys   string // .../keys
 	Tokens string // .../tokens
 	Cache  string // .../cache
@@ -23,13 +23,21 @@ var fileWriteFn = func(f *os.File, data []byte) (int, error) { return f.Write(da
 var fileCloseFn = func(f *os.File) error { return f.Close() }
 var renameFn = os.Rename
 
-// DefaultDirs returns the standard state directories, expanding $HOME.
+// DefaultDirs returns the standard state directories, honoring VSYNC_STATE_DIR
+// as a full override and XDG_STATE_DIR as the state root parent.
 func DefaultDirs() (*Dirs, error) {
-	home, err := userHomeDirFn()
-	if err != nil {
-		return nil, fmt.Errorf("cannot determine home directory: %w", err)
+	base := os.Getenv("VSYNC_STATE_DIR")
+	if base == "" {
+		if xdgStateDir := os.Getenv("XDG_STATE_DIR"); xdgStateDir != "" {
+			base = filepath.Join(xdgStateDir, "vsync")
+		} else {
+			home, err := userHomeDirFn()
+			if err != nil {
+				return nil, fmt.Errorf("cannot determine home directory: %w", err)
+			}
+			base = filepath.Join(home, ".local", "state", "vsync")
+		}
 	}
-	base := filepath.Join(home, ".local", "state", "vsync")
 	return &Dirs{
 		Base:   base,
 		Keys:   filepath.Join(base, "keys"),

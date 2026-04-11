@@ -110,8 +110,8 @@ vsync init
 # Vault address (VAULT_ADDR): https://vault.example.com
 # Vault token (VAULT_TOKEN): ••••••••
 # vsync: verifying vault connectivity… ✓
-# vsync: credentials stored at ~/.local/state/vsync/tokens
-# vsync: encryption key at     ~/.local/state/vsync/keys/default.key
+# vsync: credentials stored at <state dir>/tokens
+# vsync: encryption key at     <state dir>/keys/default.key
 ```
 
 You can also pass credentials as flags or environment variables to skip the prompts:
@@ -120,6 +120,10 @@ You can also pass credentials as flags or environment variables to skip the prom
 VAULT_ADDR=https://vault.example.com VAULT_TOKEN=hvs.xxx vsync init
 vsync init --vault-addr https://vault.example.com --vault-token hvs.xxx
 ```
+
+If you want vsync to store its state somewhere other than the default, set
+`VSYNC_STATE_DIR` for a full override or `XDG_STATE_DIR` to use `$XDG_STATE_DIR/vsync`
+before running `vsync init`.
 
 ### 4. Enter the vsync shell
 
@@ -264,7 +268,7 @@ Example output:
 
 ```
 === vsync status ===
-  Key file:            ~/.local/state/vsync/keys/default.key
+  Key file:            <state dir>/keys/default.key
   Vault address:       https://vault.example.com
   Token TTL:           11h59m42s
   Config file:         ~/.config/vsync/config.yaml
@@ -315,7 +319,7 @@ These flags work with every command.
 | `--vault-addr` | `VAULT_ADDR` | Vault server address |
 | `--vault-token` | `VAULT_TOKEN` | Vault token |
 | `--config` | `VSYNC_CONFIG` | Config file path |
-| `--key` | `VSYNC_KEY` | Encryption key file path |
+| `--key` | `VSYNC_KEY` | Encryption key file path (defaults to `<state dir>/keys/default.key`) |
 
 Flags take precedence over environment variables, which take precedence over the
 encrypted values stored by `vsync init`.
@@ -324,11 +328,16 @@ encrypted values stored by `vsync init`.
 
 ## Where things are stored
 
+The vsync state directory is resolved in this order:
+1. `VSYNC_STATE_DIR` if set (full override)
+2. `XDG_STATE_DIR/vsync` if `XDG_STATE_DIR` is set
+3. `~/.local/state/vsync` as the fallback
+
 ```
 ~/.config/vsync/
   config.yaml                          ← your configuration
 
-~/.local/state/vsync/
+<state dir>/
   keys/
     default.key                        ← 32-byte AES-256 key (never leaves disk)
   tokens/
@@ -366,8 +375,8 @@ Use `vsync status` to see expiry times and `vsync cache clear` to invalidate ent
 
 ## Security notes
 
-- **The key never leaves disk.** The 32-byte AES key lives only in
-  `~/.local/state/vsync/keys/default.key` and in process memory while vsync is running.
+- **The key never leaves disk.** The 32-byte AES key lives only in the resolved state
+  directory (`<state dir>/keys/default.key`) and in process memory while vsync is running.
   It is never exported as an environment variable.
 - **Credentials are decrypted on demand.** The Vault token is decrypted when needed and
   not retained in memory beyond the operation that required it.
@@ -420,7 +429,7 @@ next use.
 ### A shimmed command isn't picking up the right binary
 
 Make sure the real binary is somewhere later in `PATH` than the shim directory
-(`~/.local/state/vsync/shims`). Check with:
+(`<state dir>/shims` after resolution). Check with:
 
 ```sh
 which -a pi     # should show the shim first, real binary second
