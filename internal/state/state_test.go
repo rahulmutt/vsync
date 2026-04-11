@@ -1,6 +1,7 @@
 package state
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -55,6 +56,14 @@ func TestEnsureAllCreatesDirectories(t *testing.T) {
 			t.Fatalf("perm for %s = %v, want %v", dir, got, want)
 		}
 	}
+
+	dirs.Keys = filepath.Join(t.TempDir(), "not-a-dir")
+	if err := os.WriteFile(dirs.Keys, []byte("file"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := dirs.EnsureAll(); err == nil {
+		t.Fatal("EnsureAll() error = nil, want mkdir failure")
+	}
 }
 
 func TestWriteAtomicWritesContentAndMode(t *testing.T) {
@@ -78,7 +87,14 @@ func TestWriteAtomicWritesContentAndMode(t *testing.T) {
 	}
 }
 
-func TestWriteAtomicFailsWhenParentPathIsAFile(t *testing.T) {
+func TestDefaultDirsAndWriteAtomicErrorPaths(t *testing.T) {
+	origHome := userHomeDirFn
+	userHomeDirFn = func() (string, error) { return "", errors.New("no home") }
+	defer func() { userHomeDirFn = origHome }()
+	if _, err := DefaultDirs(); err == nil || err.Error() != "cannot determine home directory: no home" {
+		t.Fatalf("DefaultDirs() error = %v, want wrapped no home", err)
+	}
+
 	root := t.TempDir()
 	parent := filepath.Join(root, "parent")
 	if err := os.WriteFile(parent, []byte("not a dir"), 0600); err != nil {
@@ -86,5 +102,39 @@ func TestWriteAtomicFailsWhenParentPathIsAFile(t *testing.T) {
 	}
 	if err := WriteAtomic(filepath.Join(parent, "child.txt"), []byte("x"), 0600); err == nil {
 		t.Fatal("WriteAtomic() error = nil, want mkdir failure")
+	}
+
+	origCreateTemp, origRename := createTempFn, renameFn
+	origChmod, origWrite, origClose := fileChmodFn, fileWriteFn, fileCloseFn
+	defer func() {
+		createTempFn = origCreateTemp
+		renameFn = origRename
+		fileChmodFn = origChmod
+		fileWriteFn = origWrite
+		fileCloseFn = origClose
+	}()
+	createTempFn = func(string, string) (*os.File, error) { return nil, errors.New("temp fail") }
+	if err := WriteAtomic(filepath.Join(t.TempDir(), "temp.txt"), []byte("x"), 0600); err == nil || err.Error() != "create temp: temp fail" {
+		t.Fatalf("WriteAtomic() create temp error = %v, want temp fail", err)
+	}
+	createTempFn = origCreateTemp
+	fileChmodFn = func(*os.File, os.FileMode) error { return errors.New("chmod fail") }
+	if err := WriteAtomic(filepath.Join(t.TempDir(), "chmod.txt"), []byte("x"), 0600); err == nil || err.Error() != "chmod fail" {
+		t.Fatalf("WriteAtomic() chmod error = %v, want chmod fail", err)
+	}
+	fileChmodFn = origChmod
+	fileWriteFn = func(*os.File, []byte) (int, error) { return 0, errors.New("write fail") }
+	if err := WriteAtomic(filepath.Join(t.TempDir(), "write.txt"), []byte("x"), 0600); err == nil || err.Error() != "write fail" {
+		t.Fatalf("WriteAtomic() write error = %v, want write fail", err)
+	}
+	fileWriteFn = origWrite
+	fileCloseFn = func(*os.File) error { return errors.New("close fail") }
+	if err := WriteAtomic(filepath.Join(t.TempDir(), "close.txt"), []byte("x"), 0600); err == nil || err.Error() != "close fail" {
+		t.Fatalf("WriteAtomic() close error = %v, want close fail", err)
+	}
+	fileCloseFn = origClose
+	renameFn = func(string, string) error { return errors.New("rename fail") }
+	if err := WriteAtomic(filepath.Join(t.TempDir(), "rename.txt"), []byte("x"), 0600); err == nil || err.Error() != "rename fail" {
+		t.Fatalf("WriteAtomic() rename error = %v, want rename fail", err)
 	}
 }

@@ -25,19 +25,19 @@ func syncCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			cfg, err := config.LoadOrEmpty(cfgPath)
+			cfg, err := loadConfigFn(cfgPath)
 			if err != nil {
 				return err
 			}
-			if err := cfg.ExpandPaths(); err != nil {
+			if err := expandPathsFn(cfg); err != nil {
 				return err
 			}
 
-			creds, err := vlt.LoadCredentials(dirs, key, resolveVaultAddr(), resolveVaultToken())
+			creds, err := loadCredsFn(dirs, key, resolveVaultAddr(), resolveVaultToken())
 			if err != nil {
 				return err
 			}
-			client, err := vlt.NewClient(creds, cfg.Vault.KVVersion)
+			client, err := newVaultClientFn(creds, cfg.Vault.KVVersion)
 			if err != nil {
 				return err
 			}

@@ -11,7 +11,15 @@ import (
 	vlt "github.com/vsync/vsync/internal/vault"
 )
 
-var shellLaunchFn = shell.Launch
+var (
+	shellLaunchFn   = shell.Launch
+	loadConfigFn    = config.LoadOrEmpty
+	expandPathsFn   = func(cfg *config.Config) error { return cfg.ExpandPaths() }
+	ensureShimsFn   = shim.Ensure
+	loadCredsFn     = vlt.LoadCredentials
+	newVaultClientFn = vlt.NewClient
+	syncFilesFn     = syncFiles
+)
 
 func shellCmd() *cobra.Command {
 	var shellBin string
@@ -33,11 +41,11 @@ exec's into a new shell with the shims directory prepended to PATH.`,
 			if err != nil {
 				return err
 			}
-			cfg, err := config.LoadOrEmpty(cfgPath)
+			cfg, err := loadConfigFn(cfgPath)
 			if err != nil {
 				return err
 			}
-			if err := cfg.ExpandPaths(); err != nil {
+			if err := expandPathsFn(cfg); err != nil {
 				return err
 			}
 
@@ -48,21 +56,21 @@ exec's into a new shell with the shims directory prepended to PATH.`,
 			}
 
 			// Ensure shim scripts exist.
-			if err := shim.Ensure(dirs, commandNames); err != nil {
+			if err := ensureShimsFn(dirs, commandNames); err != nil {
 				return fmt.Errorf("build shims: %w", err)
 			}
 
 			// Sync files from Vault (best-effort; warn on failure).
 			if len(cfg.Files) > 0 {
-				creds, err := vlt.LoadCredentials(dirs, key, resolveVaultAddr(), resolveVaultToken())
+				creds, err := loadCredsFn(dirs, key, resolveVaultAddr(), resolveVaultToken())
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "vsync: cannot load vault credentials for file sync: %v\n", err)
 				} else {
-					client, err := vlt.NewClient(creds, cfg.Vault.KVVersion)
+					client, err := newVaultClientFn(creds, cfg.Vault.KVVersion)
 					if err != nil {
 						fmt.Fprintf(os.Stderr, "vsync: vault client error: %v\n", err)
 					} else {
-						syncFiles(dirs, key, client, cfg)
+						syncFilesFn(dirs, key, client, cfg)
 					}
 				}
 			}

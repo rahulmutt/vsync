@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -242,6 +243,24 @@ func TestLoadCredentialsPrefersOverridesAndReportsMissing(t *testing.T) {
 	}
 }
 
+func TestLoadCredentialsPartialOverrides(t *testing.T) {
+	base := t.TempDir()
+	dirs := &state.Dirs{Base: base, Keys: filepath.Join(base, "keys"), Tokens: filepath.Join(base, "tokens"), Cache: filepath.Join(base, "cache"), Shims: filepath.Join(base, "shims")}
+	if err := dirs.EnsureAll(); err != nil {
+		t.Fatal(err)
+	}
+	key := make([]byte, 32)
+	if err := StoreCredentials(dirs, key, "http://stored:8200", "stored-token"); err != nil {
+		t.Fatal(err)
+	}
+	if creds, err := LoadCredentials(dirs, key, "http://override:8200", ""); err != nil || creds.Addr != "http://override:8200" || creds.Token != "stored-token" {
+		t.Fatalf("LoadCredentials(addr override) = %#v, %v", creds, err)
+	}
+	if creds, err := LoadCredentials(dirs, key, "", "override-token"); err != nil || creds.Addr != "http://stored:8200" || creds.Token != "override-token" {
+		t.Fatalf("LoadCredentials(token override) = %#v, %v", creds, err)
+	}
+}
+
 func TestGetCachedFileSecretUsesFreshCacheAndFallsBackOnError(t *testing.T) {
 	base := t.TempDir()
 	dirs := &state.Dirs{
@@ -292,6 +311,47 @@ func TestGetCachedFileSecretUsesFreshCacheAndFallsBackOnError(t *testing.T) {
 	}
 }
 
+func TestNewClientAndCredentialsErrorPaths(t *testing.T) {
+	if _, err := NewClient(&Credentials{Addr: "://bad", Token: "token"}, 2); err == nil {
+		t.Fatal("NewClient() error = nil, want parse error")
+	}
+
+	base := t.TempDir()
+	dirs := &state.Dirs{
+		Base:   base,
+		Keys:   filepath.Join(base, "keys"),
+		Tokens: filepath.Join(base, "tokens"),
+		Cache:  filepath.Join(base, "cache"),
+		Shims:  filepath.Join(base, "shims"),
+	}
+	if err := dirs.EnsureAll(); err != nil {
+		t.Fatal(err)
+	}
+	key := make([]byte, 32)
+	if err := StoreCredentials(dirs, key, "http://stored:8200", "stored-token"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadCredentials(dirs, key[:16], "", ""); err == nil {
+		t.Fatal("LoadCredentials() error = nil, want decrypt error")
+	}
+
+	badDirs := &state.Dirs{Base: base, Keys: dirs.Keys, Tokens: filepath.Join(base, "tokenfile"), Cache: dirs.Cache, Shims: dirs.Shims}
+	if err := os.WriteFile(badDirs.Tokens, []byte("file"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := StoreCredentials(badDirs, key, "http://stored:8200", "stored-token"); err == nil {
+		t.Fatal("StoreCredentials() error = nil, want mkdir failure")
+	}
+
+	fileDirs := &state.Dirs{Base: base, Keys: dirs.Keys, Tokens: filepath.Join(base, "tokens-file"), Cache: dirs.Cache, Shims: dirs.Shims}
+	if err := os.WriteFile(fileDirs.Tokens, []byte("file"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := StoreCredentials(fileDirs, key, "http://stored:8200", "stored-token"); err == nil {
+		t.Fatal("StoreCredentials() error = nil, want mkdir failure")
+	}
+}
+
 func TestCachedSecretsReturnErrorWithoutCacheWhenVaultFails(t *testing.T) {
 	dirs := &state.Dirs{Base: t.TempDir(), Keys: filepath.Join(t.TempDir(), "keys"), Tokens: filepath.Join(t.TempDir(), "tokens"), Cache: filepath.Join(t.TempDir(), "cache"), Shims: filepath.Join(t.TempDir(), "shims")}
 	if err := dirs.EnsureAll(); err != nil {
@@ -311,5 +371,47 @@ func TestCachedSecretsReturnErrorWithoutCacheWhenVaultFails(t *testing.T) {
 	}
 	if _, err := GetCachedFileSecret(dirs, key, client, "secret/data/vsync/files", "missing"); err == nil {
 		t.Fatal("GetCachedFileSecret() error = nil, want vault error")
+	}
+}
+
+func TestTokenTTLUnlimitedAndStaleCacheFallback(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/auth/token/lookup-self", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"auth": map[string]any{"lease_duration": 0}})
+	})
+	mux.HandleFunc("/v1/secret/data/vsync/env/gemini-api-key", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	})
+	mux.HandleFunc("/v1/secret/data/vsync/files/example", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client, err := NewClient(&Credentials{Addr: server.URL, Token: "token"}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ttl, err := client.TokenTTL(); err != nil || ttl != 0 {
+		t.Fatalf("TokenTTL() = %v, %v, want 0, nil", ttl, err)
+	}
+
+	base := t.TempDir()
+	dirs := &state.Dirs{Base: base, Keys: filepath.Join(base, "keys"), Tokens: filepath.Join(base, "tokens"), Cache: filepath.Join(base, "cache"), Shims: filepath.Join(base, "shims")}
+	if err := dirs.EnsureAll(); err != nil {
+		t.Fatal(err)
+	}
+	key := make([]byte, 32)
+	if err := WriteCache(dirs, key, "env", "gemini-api-key", &CacheEntry{Value: "stale-env", ExpiresAt: time.Now().Add(-time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteCache(dirs, key, "files", "example", &CacheEntry{Value: "stale-file", ExpiresAt: time.Now().Add(-time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := GetCachedEnvSecret(dirs, key, client, "secret/data/vsync/env", "gemini-api-key"); err != nil || got != "stale-env" {
+		t.Fatalf("GetCachedEnvSecret() stale fallback = %q, %v", got, err)
+	}
+	if got, err := GetCachedFileSecret(dirs, key, client, "secret/data/vsync/files", "example"); err != nil || got != "stale-file" {
+		t.Fatalf("GetCachedFileSecret() stale fallback = %q, %v", got, err)
 	}
 }

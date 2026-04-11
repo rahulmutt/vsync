@@ -16,6 +16,10 @@ var (
 	flagKeyPath    string
 )
 
+var userHomeDirFn = os.UserHomeDir
+var exitFn = os.Exit
+var resolveDirsFn = state.DefaultDirs
+
 // globalKey is lazily loaded once per process.
 var globalKey []byte
 var globalDirs *state.Dirs
@@ -33,7 +37,7 @@ where configured commands are shimmed to automatically inject secrets from Vault
 			if cmd.Name() == "init" {
 				return nil
 			}
-			dirs, err := resolveDirs()
+			dirs, err := resolveDirsFn()
 			if err != nil {
 				return err
 			}
@@ -90,7 +94,7 @@ func resolveConfigPath() (string, error) {
 }
 
 func defaultConfigPath() (string, error) {
-	home, err := os.UserHomeDir()
+	home, err := userHomeDirFn()
 	if err != nil {
 		return "", err
 	}
@@ -113,5 +117,5 @@ func resolveVaultToken() string {
 
 func die(format string, a ...any) {
 	fmt.Fprintf(os.Stderr, "vsync: "+format+"\n", a...)
-	os.Exit(1)
+	exitFn(1)
 }

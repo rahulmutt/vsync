@@ -71,4 +71,25 @@ func TestEnsureListAndRemove(t *testing.T) {
 	if err := Remove(dirs, "missing"); err != nil {
 		t.Fatalf("Remove() missing error = %v", err)
 	}
+
+	missing := &state.Dirs{Shims: filepath.Join(t.TempDir(), "missing")}
+	if names, err := List(missing); err != nil || names != nil {
+		t.Fatalf("List() missing = (%#v, %v), want (nil, nil)", names, err)
+	}
+
+	fileDir := filepath.Join(base, "filedir")
+	if err := os.WriteFile(fileDir, []byte("file"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if names, err := List(&state.Dirs{Shims: fileDir}); err == nil || names != nil {
+		t.Fatalf("List() file dir = (%#v, %v), want error", names, err)
+	}
+
+	bad := &state.Dirs{Shims: filepath.Join(base, "shimfile")}
+	if err := os.WriteFile(bad.Shims, []byte("file"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Ensure(bad, []string{"broken"}); err == nil {
+		t.Fatal("Ensure() error = nil, want write failure")
+	}
 }

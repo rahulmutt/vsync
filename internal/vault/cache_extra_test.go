@@ -53,7 +53,7 @@ func TestReadCacheMissingReturnsNil(t *testing.T) {
 	}
 }
 
-func TestWriteCacheCreatesParentDirectories(t *testing.T) {
+func TestWriteCacheCreatesParentDirectoriesAndErrors(t *testing.T) {
 	dirs := &state.Dirs{
 		Base:   t.TempDir(),
 		Keys:   filepath.Join(t.TempDir(), "keys"),
@@ -70,5 +70,14 @@ func TestWriteCacheCreatesParentDirectories(t *testing.T) {
 	}
 	if _, err := os.Stat(dirs.CacheFile("env", "nested/name")); err != nil {
 		t.Fatalf("cache file missing: %v", err)
+	}
+
+	badParent := filepath.Join(t.TempDir(), "parent")
+	if err := os.WriteFile(badParent, []byte("file"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	badDirs := &state.Dirs{Base: t.TempDir(), Keys: dirs.Keys, Tokens: dirs.Tokens, Cache: badParent, Shims: dirs.Shims}
+	if err := WriteCache(badDirs, key, "env", "bad", &CacheEntry{Value: "x"}); err == nil {
+		t.Fatal("WriteCache() error = nil, want mkdir failure")
 	}
 }

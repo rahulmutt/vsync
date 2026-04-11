@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-	"github.com/vsync/vsync/internal/config"
 	"github.com/vsync/vsync/internal/shell"
 	vlt "github.com/vsync/vsync/internal/vault"
 )
@@ -33,7 +32,7 @@ func execCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			cfg, err := config.LoadOrEmpty(cfgPath)
+			cfg, err := loadConfigFn(cfgPath)
 			if err != nil {
 				return err
 			}

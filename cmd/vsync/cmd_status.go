@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
-	"github.com/vsync/vsync/internal/config"
 	"github.com/vsync/vsync/internal/shim"
 	vlt "github.com/vsync/vsync/internal/vault"
 )
@@ -30,7 +29,7 @@ func statusCmd() *cobra.Command {
 			printField("Key file", keyPath)
 
 			// Vault address.
-			creds, err := vlt.LoadCredentials(dirs, key, resolveVaultAddr(), resolveVaultToken())
+			creds, err := loadCredsFn(dirs, key, resolveVaultAddr(), resolveVaultToken())
 			if err != nil {
 				fmt.Printf("  %-20s %s\n", "Credentials:", "NOT FOUND (run 'vsync init')")
 			} else {
@@ -41,7 +40,7 @@ func statusCmd() *cobra.Command {
 				printField("Vault address", truncAddr)
 
 				// Token TTL.
-				client, cerr := vlt.NewClient(creds, 2)
+				client, cerr := newVaultClientFn(creds, 2)
 				if cerr == nil {
 					ttl, terr := client.TokenTTL()
 					if terr == nil {
@@ -59,7 +58,7 @@ func statusCmd() *cobra.Command {
 			// Config.
 			cfgPath, _ := resolveConfigPath()
 			printField("Config file", cfgPath)
-			cfg, cfgErr := config.LoadOrEmpty(cfgPath)
+			cfg, cfgErr := loadConfigFn(cfgPath)
 			if cfgErr != nil {
 				fmt.Printf("  %-20s %v\n", "Config error:", cfgErr)
 			} else {

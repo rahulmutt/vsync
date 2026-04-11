@@ -32,6 +32,11 @@ func TestBuildEnvPrependsShimDirAndSetsVsyncVars(t *testing.T) {
 	if !strings.Contains(got, "VSYNC_KEY=/tmp/key") {
 		t.Fatalf("VSYNC_KEY not set: %v", env)
 	}
+
+	t.Setenv("PATH", "")
+	if got := buildEnv("/tmp/shims", "/tmp/key"); !strings.Contains(strings.Join(got, "\n"), "PATH=/tmp/shims") {
+		t.Fatalf("PATH not set when PATH empty: %v", got)
+	}
 }
 
 func TestLaunchRejectsNestedShellAndMissingBinary(t *testing.T) {
@@ -114,9 +119,25 @@ func TestExecCommandMissingBinaryAndMergesEnv(t *testing.T) {
 	if !strings.Contains(joined, "A=1") || !strings.Contains(joined, "B=2") {
 		t.Fatalf("extra env not merged: %v", gotEnv)
 	}
+
+	t.Setenv("PATH", "")
+	if _, err := findReal("missing", "/tmp/shims"); err == nil {
+		t.Fatal("findReal() error = nil, want command not found")
+	}
+	noExec := filepath.Join(t.TempDir(), "noexec")
+	if err := os.WriteFile(noExec, []byte("#!/bin/sh\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", noExec)
+	if _, err := findReal("noexec", "/tmp/shims"); err == nil {
+		t.Fatal("findReal() error = nil, want not executable error")
+	}
+	if err := ExecCommand("missing", nil, nil, "/tmp/shims"); err == nil {
+		t.Fatal("ExecCommand() error = nil, want command not found")
+	}
 }
 
-func TestFindRealSkipsShimDir(t *testing.T) {
+func TestFindRealSkipsShimDirAndErrors(t *testing.T) {
 	root := t.TempDir()
 	shimDir := filepath.Join(root, "shims")
 	binDir := filepath.Join(root, "bin")
@@ -141,5 +162,10 @@ func TestFindRealSkipsShimDir(t *testing.T) {
 	}
 	if got != realPath {
 		t.Fatalf("findReal() = %q, want %q", got, realPath)
+	}
+
+	t.Setenv("PATH", "")
+	if _, err := findReal("missing", shimDir); err == nil {
+		t.Fatal("findReal() error = nil, want command not found")
 	}
 }

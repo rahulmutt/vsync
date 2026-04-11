@@ -9,9 +9,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+var userHomeDirFn = os.UserHomeDir
+
 // DefaultConfigPath returns the default config file path.
 func DefaultConfigPath() (string, error) {
-	home, err := os.UserHomeDir()
+	home, err := userHomeDirFn()
 	if err != nil {
 		return "", err
 	}
@@ -110,7 +112,7 @@ func (c *Config) FindCommand(name string) *CommandEntry {
 
 // ExpandPaths expands ~ in all file paths.
 func (c *Config) ExpandPaths() error {
-	home, err := os.UserHomeDir()
+	home, err := userHomeDirFn()
 	if err != nil {
 		return err
 	}

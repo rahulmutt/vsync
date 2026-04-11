@@ -24,6 +24,8 @@ var (
 	resolveVaultAddrFn  = resolveVaultAddr
 	resolveVaultTokenFn = resolveVaultToken
 	promptFn            = prompt
+	isTerminalFn        = term.IsTerminal
+	readPasswordFn      = term.ReadPassword
 )
 
 func initCmd() *cobra.Command {
@@ -129,8 +131,8 @@ without exposing credentials in plain text.`,
 
 func prompt(label string, secret bool) (string, error) {
 	fmt.Print(label)
-	if secret && term.IsTerminal(syscall.Stdin) {
-		b, err := term.ReadPassword(syscall.Stdin)
+	if secret && isTerminalFn(syscall.Stdin) {
+		b, err := readPasswordFn(syscall.Stdin)
 		fmt.Println()
 		if err != nil {
 			return "", err

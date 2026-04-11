@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -51,10 +52,11 @@ files:
 	}
 }
 
-func TestLoadOrEmptyMissingFile(t *testing.T) {
-	cfg, err := LoadOrEmpty(filepath.Join(t.TempDir(), "missing.yaml"))
+func TestLoadOrEmptyMissingAndExistingFile(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing.yaml")
+	cfg, err := LoadOrEmpty(missing)
 	if err != nil {
-		t.Fatalf("LoadOrEmpty() error = %v", err)
+		t.Fatalf("LoadOrEmpty() missing error = %v", err)
 	}
 	if got, want := cfg.Vault.EnvPrefix, "secret/data/vsync/env"; got != want {
 		t.Fatalf("EnvPrefix = %q, want %q", got, want)
@@ -64,6 +66,24 @@ func TestLoadOrEmptyMissingFile(t *testing.T) {
 	}
 	if got, want := cfg.Vault.KVVersion, 2; got != want {
 		t.Fatalf("KVVersion = %d, want %d", got, want)
+	}
+
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte("files:\n  - path: ~/x\n    key: y\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = LoadOrEmpty(path)
+	if err != nil {
+		t.Fatalf("LoadOrEmpty() existing error = %v", err)
+	}
+	if got, want := cfg.Files[0].Mode, "0600"; got != want {
+		t.Fatalf("default file mode = %q, want %q", got, want)
+	}
+}
+
+func TestLoadReportsMissingFile(t *testing.T) {
+	if _, err := Load(filepath.Join(t.TempDir(), "missing.yaml")); err == nil {
+		t.Fatal("Load() error = nil, want missing file error")
 	}
 }
 
@@ -109,6 +129,19 @@ func TestExpandPathsHandlesTildeAndLeavesOtherPaths(t *testing.T) {
 	}
 	if got, want := cfg.Files[3].Path, "/abs.txt"; got != want {
 		t.Fatalf("ExpandPaths(abs) = %q, want %q", got, want)
+	}
+}
+
+func TestDefaultConfigPathAndExpandPathsError(t *testing.T) {
+	origHome := userHomeDirFn
+	userHomeDirFn = func() (string, error) { return "", errors.New("no home") }
+	defer func() { userHomeDirFn = origHome }()
+	if _, err := DefaultConfigPath(); err == nil || err.Error() != "no home" {
+		t.Fatalf("DefaultConfigPath() error = %v, want no home", err)
+	}
+	cfg := &Config{Files: []FileEntry{{Path: "~/x"}}}
+	if err := cfg.ExpandPaths(); err == nil || err.Error() != "no home" {
+		t.Fatalf("ExpandPaths() error = %v, want no home", err)
 	}
 }
 

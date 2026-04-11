@@ -1,8 +1,12 @@
 package main
 
 import (
+	"bytes"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -34,6 +38,18 @@ func TestResolveHelpers(t *testing.T) {
 	}
 	if got, err := resolveConfigPath(); err != nil || got != "/tmp/config.yaml" {
 		t.Fatalf("resolveConfigPath() = (%q, %v)", got, err)
+	}
+}
+
+func TestResolveDirsAndKey(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dirs, err := resolveDirs()
+	if err != nil {
+		t.Fatalf("resolveDirs() error = %v", err)
+	}
+	if dirs.Base == "" {
+		t.Fatal("resolveDirs() returned empty dirs")
 	}
 }
 
@@ -216,6 +232,30 @@ func TestPersistentPreRunSetsGlobalsForNonInit(t *testing.T) {
 	}
 }
 
+func TestRootCmdVersionAndHelp(t *testing.T) {
+	root := rootCmd()
+	if root.Version == "" {
+		t.Fatal("root.Version is empty")
+	}
+	oldArgs := os.Args
+	os.Args = []string{"vsync", "--version"}
+	if err := root.Execute(); err != nil {
+		t.Fatalf("Execute(--version) error = %v", err)
+	}
+	os.Args = oldArgs
+}
+
+func TestPersistentPreRunResolveDirsError(t *testing.T) {
+	orig := resolveDirsFn
+	resolveDirsFn = func() (*state.Dirs, error) { return nil, errors.New("dirs") }
+	defer func() { resolveDirsFn = orig }()
+	root := rootCmd()
+	status := &cobra.Command{Use: "status"}
+	if err := root.PersistentPreRunE(status, nil); err == nil || !strings.Contains(err.Error(), "dirs") {
+		t.Fatalf("PersistentPreRunE() error = %v, want dirs", err)
+	}
+}
+
 func TestPersistentPreRunSkipsInit(t *testing.T) {
 	globalDirs = nil
 	globalKey = nil
@@ -231,6 +271,42 @@ func TestPersistentPreRunSkipsInit(t *testing.T) {
 	if globalDirs != nil || globalKey != nil {
 		t.Fatalf("init pre-run should not set globals, got %#v %#v", globalDirs, globalKey)
 	}
+}
+
+func TestDefaultConfigPathAndDieAndMain(t *testing.T) {
+	origHome := userHomeDirFn
+	userHomeDirFn = func() (string, error) { return "", errors.New("boom") }
+	if _, err := defaultConfigPath(); err == nil || err.Error() != "boom" {
+		t.Fatalf("defaultConfigPath() error = %v, want boom", err)
+	}
+	userHomeDirFn = origHome
+
+	var gotExit int
+	origExit := exitFn
+	exitFn = func(code int) { gotExit = code }
+	defer func() { exitFn = origExit }()
+
+	oldStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = w
+	defer func() { os.Stderr = oldStderr }()
+	die("hello %s", "world")
+	_ = w.Close()
+	out, _ := io.ReadAll(r)
+	if gotExit != 1 {
+		t.Fatalf("die() exit = %d, want 1", gotExit)
+	}
+	if !bytes.Contains(out, []byte("vsync: hello world")) {
+		t.Fatalf("die() stderr = %q, want prefix", out)
+	}
+
+	oldArgs := os.Args
+	os.Args = []string{"vsync", "--help"}
+	defer func() { os.Args = oldArgs }()
+	main()
 }
 
 func TestToSet(t *testing.T) {
