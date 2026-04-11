@@ -1,4 +1,5 @@
 [tools]
+"github:slsa-framework/slsa-verifier" = "2.7.1"
 go = "1.26"
 
 [tasks.build]
