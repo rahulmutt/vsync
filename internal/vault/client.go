@@ -11,6 +11,11 @@ import (
 	"github.com/vsync/vsync/internal/state"
 )
 
+var (
+	decryptFileFn = crypto.DecryptFile
+	encryptFileFn = crypto.EncryptFile
+)
+
 const cacheMargin = 10 * time.Second
 
 // Credentials holds the decrypted Vault connection details.
@@ -24,7 +29,7 @@ type Credentials struct {
 func LoadCredentials(dirs *state.Dirs, key []byte, addrOverride, tokenOverride string) (*Credentials, error) {
 	addr := addrOverride
 	if addr == "" {
-		raw, err := crypto.DecryptFile(key, dirs.TokenFile("vault_addr"))
+		raw, err := decryptFileFn(key, dirs.TokenFile("vault_addr"))
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				return nil, fmt.Errorf("vault credentials not found; run 'vsync init' first")
@@ -36,7 +41,7 @@ func LoadCredentials(dirs *state.Dirs, key []byte, addrOverride, tokenOverride s
 
 	token := tokenOverride
 	if token == "" {
-		raw, err := crypto.DecryptFile(key, dirs.TokenFile("vault_token"))
+		raw, err := decryptFileFn(key, dirs.TokenFile("vault_token"))
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				return nil, fmt.Errorf("vault credentials not found; run 'vsync init' first")
@@ -51,10 +56,10 @@ func LoadCredentials(dirs *state.Dirs, key []byte, addrOverride, tokenOverride s
 
 // StoreCredentials encrypts and writes VAULT_ADDR and VAULT_TOKEN to the state directory.
 func StoreCredentials(dirs *state.Dirs, key []byte, addr, token string) error {
-	if err := crypto.EncryptFile(key, dirs.TokenFile("vault_addr"), []byte(addr)); err != nil {
+	if err := encryptFileFn(key, dirs.TokenFile("vault_addr"), []byte(addr)); err != nil {
 		return fmt.Errorf("store vault_addr: %w", err)
 	}
-	if err := crypto.EncryptFile(key, dirs.TokenFile("vault_token"), []byte(token)); err != nil {
+	if err := encryptFileFn(key, dirs.TokenFile("vault_token"), []byte(token)); err != nil {
 		return fmt.Errorf("store vault_token: %w", err)
 	}
 	return nil

@@ -1,12 +1,12 @@
 package crypto
 
 import (
+	"crypto/cipher"
+	crand "crypto/rand"
 	"errors"
 	"os"
 	"path/filepath"
 	"testing"
-
-	crand "crypto/rand"
 )
 
 func TestEncryptDecryptRoundTrip(t *testing.T) {
@@ -183,5 +183,19 @@ func TestEncryptFileDecryptFile(t *testing.T) {
 	}
 	if _, err := DecryptFile(key, bad); err == nil {
 		t.Fatal("DecryptFile() error = nil, want decrypt error")
+	}
+}
+
+func TestEncryptAndDecryptGCMErrorPaths(t *testing.T) {
+	orig := newGCMFn
+	defer func() { newGCMFn = orig }()
+	newGCMFn = func(cipher.Block) (cipher.AEAD, error) { return nil, errors.New("gcm") }
+
+	key := make([]byte, keySize)
+	if _, err := Encrypt(key, []byte("x")); err == nil {
+		t.Fatal("Encrypt() error = nil, want GCM error")
+	}
+	if _, err := Decrypt(key, append(make([]byte, nonceSize), byte(1))); err == nil {
+		t.Fatal("Decrypt() error = nil, want GCM error")
 	}
 }

@@ -12,6 +12,8 @@ import (
 	"github.com/vsync/vsync/internal/state"
 )
 
+var jsonMarshalFn = json.Marshal
+
 // CacheEntry is the JSON structure stored inside an encrypted cache file.
 type CacheEntry struct {
 	Value     string    `json:"value"`
@@ -48,7 +50,7 @@ func ReadCache(dirs *state.Dirs, key []byte, kind, name string) (*CacheEntry, er
 
 // WriteCache encrypts and writes a cache entry to disk.
 func WriteCache(dirs *state.Dirs, key []byte, kind, name string, entry *CacheEntry) error {
-	data, err := json.Marshal(entry)
+	data, err := jsonMarshalFn(entry)
 	if err != nil {
 		return fmt.Errorf("marshal cache: %w", err)
 	}

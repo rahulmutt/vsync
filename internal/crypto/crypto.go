@@ -13,6 +13,11 @@ import (
 	"github.com/vsync/vsync/internal/state"
 )
 
+var (
+	newCipherFn = aes.NewCipher
+	newGCMFn    = cipher.NewGCM
+)
+
 const (
 	keySize        = 32 // AES-256
 	nonceSize      = 12 // GCM standard nonce
@@ -54,11 +59,11 @@ func LoadOrGenerateKey(path string) ([]byte, error) {
 // Encrypt encrypts plaintext with AES-256-GCM using key.
 // Output format: nonce (12 bytes) || ciphertext+tag.
 func Encrypt(key, plaintext []byte) ([]byte, error) {
-	block, err := aes.NewCipher(key)
+	block, err := newCipherFn(key)
 	if err != nil {
 		return nil, err
 	}
-	gcm, err := cipher.NewGCM(block)
+	gcm, err := newGCMFn(block)
 	if err != nil {
 		return nil, err
 	}
@@ -75,11 +80,11 @@ func Decrypt(key, blob []byte) ([]byte, error) {
 	if len(blob) < nonceSize {
 		return nil, fmt.Errorf("ciphertext too short")
 	}
-	block, err := aes.NewCipher(key)
+	block, err := newCipherFn(key)
 	if err != nil {
 		return nil, err
 	}
-	gcm, err := cipher.NewGCM(block)
+	gcm, err := newGCMFn(block)
 	if err != nil {
 		return nil, err
 	}
