@@ -5,8 +5,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -72,15 +74,22 @@ func requireDevenvVault(t *testing.T) (*vaultapi.Client, *state.Dirs, []byte) {
 
 func TestSyncCmdAgainstDevenvVault(t *testing.T) {
 	client, dirs, key := requireDevenvVault(t)
+	secretKey := strings.ReplaceAll(t.Name(), "/", "-")
+
+	cfgPath := os.Getenv("VSYNC_CONFIG")
+	cfgContent := fmt.Sprintf("vault:\n  kv_version: 2\nfiles:\n  - path: ~/synced.txt\n    key: %s\n    mode: \"0640\"\n", secretKey)
+	if err := os.WriteFile(cfgPath, []byte(cfgContent), 0600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
 
 	// Seed a sample file secret using the live Vault dev server.
-	if _, err := client.Logical().Write("secret/data/vsync/files/example", map[string]any{
+	if _, err := client.Logical().Write("secret/data/vsync/files/"+secretKey, map[string]any{
 		"data": map[string]any{"content": "hello from devenv"},
 	}); err != nil {
 		t.Fatalf("seed vault secret: %v", err)
 	}
 
-	flagConfigPath = os.Getenv("VSYNC_CONFIG")
+	flagConfigPath = cfgPath
 	globalDirs = dirs
 	globalKey = key
 	defer func() {
@@ -105,7 +114,7 @@ func TestSyncCmdAgainstDevenvVault(t *testing.T) {
 		t.Fatalf("synced file = %q, want %q", data, "hello from devenv")
 	}
 
-	entry, err := vlt.ReadCache(dirs, key, "files", "example")
+	entry, err := vlt.ReadCache(dirs, key, "files", secretKey)
 	if err != nil || entry == nil {
 		t.Fatalf("cache entry missing: %#v %v", entry, err)
 	}
@@ -139,4 +148,3 @@ func TestCacheClearCmdAgainstDevenvVault(t *testing.T) {
 		t.Fatalf("cache not cleared: %#v %v", got, err)
 	}
 }
-

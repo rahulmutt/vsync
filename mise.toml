@@ -9,10 +9,17 @@ run = "go build -o dist/vsync ./cmd/vsync"
 run = "go test ./..."
 
 [tasks.test-integration]
-description = "Start devenv Vault and run integration tests"
+description = "Start devenv Vault, run integration tests, and tear it down"
 run = '''
 #!/usr/bin/env bash
 set -euo pipefail
+
+cleanup() {
+  devenv processes down >/dev/null 2>&1 || true
+}
+
+cleanup
+trap cleanup EXIT
 
 devenv up --detach
 devenv shell -- go test -tags integration ./...
@@ -23,6 +30,13 @@ description = "Run unit tests and devenv-backed integration tests"
 run = '''
 #!/usr/bin/env bash
 set -euo pipefail
+
+cleanup() {
+  devenv processes down >/dev/null 2>&1 || true
+}
+
+cleanup
+trap cleanup EXIT
 
 go test ./...
 devenv up --detach
