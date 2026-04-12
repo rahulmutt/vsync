@@ -65,6 +65,14 @@ All paths below refer to those resolved directories.
 
 **Path:** `~/.config/vsync/config.yaml`
 
+`vsync` also searches for `vsync.yaml` in the current directory and each parent
+directory. Those files are merged on top of the base config from root-most to
+leaf-most, so the closest `vsync.yaml` wins for overlapping settings. Merge identity
+is:
+- commands: `env.commands[*].name`
+- command variables: `env.commands[*].variables[*].name`
+- files: `files[*].key`
+
 ```yaml
 # Vault KV mount prefixes (optional — these are the defaults)
 vault:
@@ -171,7 +179,7 @@ vsync shell [--shell /bin/zsh]
 **Steps:**
 
 1. Load and decrypt Vault credentials (or use flag/env overrides).
-2. Read `~/.config/vsync/config.yaml`.
+2. Read the base config file plus any `vsync.yaml` files in the current directory and parent directories, then merge them.
 3. Sync all `files` entries (see **File Sync** below).
 4. Build shims (see **Shim Mechanism** below) in `<state dir>/shims/`.
 5. Construct child environment:
@@ -196,7 +204,7 @@ vsync exec <command> [args...]
 
 **Steps:**
 
-1. Load config; find the matching `env.commands` entry for `<command>`.
+1. Load the merged config; find the matching `env.commands` entry for `<command>`.
 2. For each `variable` in that entry:
    a. Check encrypted cache (`<cache dir>/env/<key>.enc`); use cached value if not expired.
    b. Otherwise decrypt Vault credentials, connect, fetch secret from `<env_prefix>/<key>`, cache result.
@@ -216,7 +224,7 @@ vsync sync [--file <key>]  # sync a specific file, or all if omitted
 
 **Steps:**
 
-1. Load config and decrypt Vault credentials.
+1. Load the merged config and decrypt Vault credentials.
 2. For each `files` entry (or the specified one):
    a. Check cache; if not expired, skip (unless `--force` flag is passed).
    b. Fetch secret from `<files_prefix>/<key>`; read `content` field.
@@ -366,7 +374,7 @@ vsync/
       main.go                  # entry point; registers cobra commands
   internal/
     config/
-      config.go                # load & validate ~/.config/vsync/config.yaml
+      config.go                # load & merge config files (base config + vsync.yaml overlays)
     crypto/
       crypto.go                # key generation, AES-GCM encrypt/decrypt
     vault/

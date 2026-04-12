@@ -1,4 +1,4 @@
-// Package config loads and validates ~/.config/vsync/config.yaml.
+// Package config loads and merges vsync config files.
 package config
 
 import (
@@ -10,6 +10,7 @@ import (
 )
 
 var userHomeDirFn = os.UserHomeDir
+var workingDirFn = os.Getwd
 
 // DefaultConfigPath returns the default config file path.
 func DefaultConfigPath() (string, error) {
@@ -78,26 +79,32 @@ func (c *Config) defaults() {
 
 // Load reads and parses the config file at path.
 func Load(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
+	cfg, err := loadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("read config %s: %w", path, err)
-	}
-	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parse config %s: %w", path, err)
+		return nil, err
 	}
 	cfg.defaults()
-	return &cfg, nil
+	return cfg, nil
 }
 
-// LoadOrEmpty loads the config if the file exists; returns a default config otherwise.
+// LoadOrEmpty loads the base config file plus any vsync.yaml files from the
+// current directory and its parents, merging them from top to bottom.
+// Missing files are ignored.
 func LoadOrEmpty(path string) (*Config, error) {
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		cfg := &Config{}
-		cfg.defaults()
-		return cfg, nil
+	paths, err := configPaths(path)
+	if err != nil {
+		return nil, err
 	}
-	return Load(path)
+	cfg := &Config{}
+	for _, p := range paths {
+		src, err := loadFile(p)
+		if err != nil {
+			return nil, err
+		}
+		mergeConfig(cfg, src)
+	}
+	cfg.defaults()
+	return cfg, nil
 }
 
 // FindCommand returns the CommandEntry for the given command name, or nil.
@@ -120,6 +127,136 @@ func (c *Config) ExpandPaths() error {
 		c.Files[i].Path = expandHome(c.Files[i].Path, home)
 	}
 	return nil
+}
+
+func loadFile(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read config %s: %w", path, err)
+	}
+	var cfg Config
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parse config %s: %w", path, err)
+	}
+	return &cfg, nil
+}
+
+func configPaths(basePath string) ([]string, error) {
+	paths := []string{}
+	seen := map[string]struct{}{}
+	add := func(path string) error {
+		abs, err := filepath.Abs(path)
+		if err != nil {
+			abs = filepath.Clean(path)
+		}
+		if _, ok := seen[abs]; ok {
+			return nil
+		}
+		if _, err := os.Stat(path); err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		seen[abs] = struct{}{}
+		paths = append(paths, path)
+		return nil
+	}
+
+	if basePath != "" {
+		if err := add(basePath); err != nil {
+			return nil, err
+		}
+	}
+
+	cwd, err := workingDirFn()
+	if err != nil {
+		return nil, err
+	}
+	var localPaths []string
+	for dir := cwd; ; dir = filepath.Dir(dir) {
+		localPaths = append(localPaths, filepath.Join(dir, "vsync.yaml"))
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+	}
+	for i := len(localPaths) - 1; i >= 0; i-- {
+		if err := add(localPaths[i]); err != nil {
+			return nil, err
+		}
+	}
+	return paths, nil
+}
+
+func mergeConfig(dst, src *Config) {
+	if src == nil {
+		return
+	}
+	if src.Vault.EnvPrefix != "" {
+		dst.Vault.EnvPrefix = src.Vault.EnvPrefix
+	}
+	if src.Vault.FilesPrefix != "" {
+		dst.Vault.FilesPrefix = src.Vault.FilesPrefix
+	}
+	if src.Vault.KVVersion != 0 {
+		dst.Vault.KVVersion = src.Vault.KVVersion
+	}
+	dst.Env.Commands = mergeCommands(dst.Env.Commands, src.Env.Commands)
+	dst.Files = mergeFiles(dst.Files, src.Files)
+}
+
+func mergeCommands(base []CommandEntry, overlay []CommandEntry) []CommandEntry {
+	index := make(map[string]int, len(base))
+	for i := range base {
+		index[base[i].Name] = i
+	}
+	for _, cmd := range overlay {
+		if i, ok := index[cmd.Name]; ok {
+			base[i] = mergeCommand(base[i], cmd)
+			continue
+		}
+		index[cmd.Name] = len(base)
+		base = append(base, cmd)
+	}
+	return base
+}
+
+func mergeCommand(base, overlay CommandEntry) CommandEntry {
+	base.Variables = mergeVariables(base.Variables, overlay.Variables)
+	return base
+}
+
+func mergeVariables(base []VariableEntry, overlay []VariableEntry) []VariableEntry {
+	index := make(map[string]int, len(base))
+	for i := range base {
+		index[base[i].Name] = i
+	}
+	for _, v := range overlay {
+		if i, ok := index[v.Name]; ok {
+			base[i] = v
+			continue
+		}
+		index[v.Name] = len(base)
+		base = append(base, v)
+	}
+	return base
+}
+
+func mergeFiles(base []FileEntry, overlay []FileEntry) []FileEntry {
+	index := make(map[string]int, len(base))
+	for i := range base {
+		index[base[i].Key] = i
+	}
+	for _, f := range overlay {
+		if i, ok := index[f.Key]; ok {
+			base[i] = f
+			continue
+		}
+		index[f.Key] = len(base)
+		base = append(base, f)
+	}
+	return base
 }
 
 func expandHome(path, home string) string {

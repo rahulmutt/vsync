@@ -33,7 +33,9 @@ func rootCmd() *cobra.Command {
 where configured commands are shimmed to automatically inject secrets from Vault.
 
 State lives under VSYNC_STATE_DIR / XDG_STATE_HOME / ~/.local/state/vsync, while the
-secret cache lives under VSYNC_CACHE_DIR / XDG_CACHE_HOME / ~/.cache/vsync.`,
+secret cache lives under VSYNC_CACHE_DIR / XDG_CACHE_HOME / ~/.cache/vsync. Config is
+loaded from the base config file and layered with any vsync.yaml files found in the
+current directory and its parents.`,
 		SilenceUsage: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			// Skip for init subcommand (bootstraps dirs itself).
@@ -56,7 +58,7 @@ secret cache lives under VSYNC_CACHE_DIR / XDG_CACHE_HOME / ~/.cache/vsync.`,
 
 	root.PersistentFlags().StringVar(&flagVaultAddr, "vault-addr", "", "Vault server address (overrides VAULT_ADDR)")
 	root.PersistentFlags().StringVar(&flagVaultToken, "vault-token", "", "Vault token (overrides VAULT_TOKEN)")
-	root.PersistentFlags().StringVar(&flagConfigPath, "config", "", "Config file path (default: ~/.config/vsync/config.yaml)")
+	root.PersistentFlags().StringVar(&flagConfigPath, "config", "", "Base config file path (default: ~/.config/vsync/config.yaml, layered with vsync.yaml in cwd/parents)")
 	root.PersistentFlags().StringVar(&flagKeyPath, "key", "", "Encryption key file path (default: ~/.local/state/vsync/keys/default.key)")
 
 	root.AddCommand(

@@ -142,6 +142,12 @@ That's it. From this shell, every configured command automatically gets its secr
 **Location:** `~/.config/vsync/config.yaml`  
 Override with `--config <path>` or `VSYNC_CONFIG=<path>`.
 
+In addition to the base config, `vsync` also looks for `vsync.yaml` in the current
+directory and every parent directory. Those files are merged on top of the base config
+from top to bottom, so the closest `vsync.yaml` wins for overlapping settings.
+Entries are merged by identity: commands by `name`, command variables by variable
+`name`, and file sync entries by `key`.
+
 ```yaml
 # Optional vault settings (these are the defaults)
 vault:
@@ -224,9 +230,10 @@ vsync shell [--shell /bin/zsh]
 
 What happens when you run it:
 
-1. Configured files are synced from Vault to their local paths.
-2. Shim scripts are written (or refreshed) for every configured command.
-3. A new shell is started with:
+1. `vsync` loads the base config file plus any `vsync.yaml` files in the current directory and parent directories, then merges them.
+2. Configured files are synced from Vault to their local paths.
+3. Shim scripts are written (or refreshed) for every configured command.
+4. A new shell is started with:
    - The shim directory prepended to `PATH`
    - `VSYNC_ACTIVE=1` (prevents accidental nesting)
    - `VSYNC_KEY` set to the encryption key file path
