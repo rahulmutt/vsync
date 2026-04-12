@@ -192,6 +192,26 @@ func TestDefaultDirsAndWriteAtomicErrorPaths(t *testing.T) {
 		t.Fatalf("DefaultDirs() error = %v, want wrapped no home", err)
 	}
 
+	// The explicit state/cache overrides should bypass the home lookup entirely.
+	t.Setenv("VSYNC_STATE_DIR", filepath.Join(t.TempDir(), "state"))
+	t.Setenv("VSYNC_CACHE_DIR", filepath.Join(t.TempDir(), "cache"))
+	if dirs, err := DefaultDirs(); err != nil {
+		t.Fatalf("DefaultDirs() with overrides error = %v", err)
+	} else if dirs.Base != os.Getenv("VSYNC_STATE_DIR") || dirs.Cache != os.Getenv("VSYNC_CACHE_DIR") {
+		t.Fatalf("DefaultDirs() with overrides = %#v", dirs)
+	}
+
+	// Trigger the cache-side home-directory lookup error separately.
+	t.Setenv("VSYNC_STATE_DIR", filepath.Join(t.TempDir(), "state2"))
+	t.Setenv("VSYNC_CACHE_DIR", "")
+	if _, err := DefaultDirs(); err == nil || err.Error() != "cannot determine home directory: no home" {
+		t.Fatalf("DefaultDirs() cache error = %v, want wrapped no home", err)
+	}
+
+	// Reset env for the WriteAtomic error-path checks below.
+	t.Setenv("VSYNC_STATE_DIR", "")
+	t.Setenv("VSYNC_CACHE_DIR", "")
+
 	root := t.TempDir()
 	parent := filepath.Join(root, "parent")
 	if err := os.WriteFile(parent, []byte("not a dir"), 0600); err != nil {

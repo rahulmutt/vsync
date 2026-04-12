@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vsync/vsync/internal/config"
 	"github.com/vsync/vsync/internal/crypto"
 	shellpkg "github.com/vsync/vsync/internal/shell"
 	"github.com/vsync/vsync/internal/state"
@@ -129,5 +130,66 @@ func TestShellCmdRejectsNestedShell(t *testing.T) {
 	cmd.SilenceUsage = true
 	if err := cmd.ExecuteContext(context.Background()); err == nil || !strings.Contains(err.Error(), "nested shells are not supported") {
 		t.Fatalf("shellCmd() error = %v, want nested shell error", err)
+	}
+}
+
+func TestShellCmdUsesShellEnvAndFallback(t *testing.T) {
+	dirs, _, _ := setupShellTest(t)
+	flagVaultAddr = "http://addr"
+	flagVaultToken = "token"
+	origLoadCfg, origExpand, origEnsure, origCreds, origClient, origSync, origLaunch := loadConfigFn, expandPathsFn, ensureShimsFn, loadCredsFn, newVaultClientFn, syncFilesFn, shellLaunchFn
+	defer func() {
+		loadConfigFn = origLoadCfg
+		expandPathsFn = origExpand
+		ensureShimsFn = origEnsure
+		loadCredsFn = origCreds
+		newVaultClientFn = origClient
+		syncFilesFn = origSync
+		shellLaunchFn = origLaunch
+	}()
+	loadConfigFn = func(string, string) (*config.Config, error) {
+		return &config.Config{Env: config.EnvConfig{Commands: []config.CommandEntry{{Name: "pi"}}}}, nil
+	}
+	expandPathsFn = func(*config.Config) error { return nil }
+	ensureShimsFn = func(*state.Dirs, []string) error { return nil }
+	loadCredsFn = func(*state.Dirs, []byte, string, string) (*vlt.Credentials, error) { return &vlt.Credentials{}, nil }
+	newVaultClientFn = func(*vlt.Credentials, int) (*vlt.Client, error) { return &vlt.Client{}, nil }
+	syncFilesFn = func(interface{ CacheFile(string, string) string }, []byte, *vlt.Client, *config.Config) {}
+
+	cases := []struct {
+		name     string
+		shellEnv string
+		want     string
+	}{
+		{name: "env", shellEnv: "/bin/bash", want: "/bin/bash"},
+		{name: "fallback", shellEnv: "", want: "/bin/sh"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("SHELL", tc.shellEnv)
+			called := false
+			shellLaunchFn = func(shellBin, shimDir, keyFile string) error {
+				called = true
+				if shellBin != tc.want {
+					t.Fatalf("shellBin = %q, want %q", shellBin, tc.want)
+				}
+				if shimDir != dirs.Shims {
+					t.Fatalf("shimDir = %q, want %q", shimDir, dirs.Shims)
+				}
+				if keyFile != dirs.KeyFile() {
+					t.Fatalf("keyFile = %q, want %q", keyFile, dirs.KeyFile())
+				}
+				return context.Canceled
+			}
+			cmd := shellCmd()
+			cmd.SilenceErrors = true
+			cmd.SilenceUsage = true
+			if err := cmd.ExecuteContext(context.Background()); err != context.Canceled {
+				t.Fatalf("shellCmd() error = %v, want context.Canceled", err)
+			}
+			if !called {
+				t.Fatal("shellLaunchFn was not called")
+			}
+		})
 	}
 }

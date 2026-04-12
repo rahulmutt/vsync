@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vsync/vsync/internal/config"
 	"github.com/vsync/vsync/internal/crypto"
 	"github.com/vsync/vsync/internal/state"
 	vlt "github.com/vsync/vsync/internal/vault"
@@ -228,5 +230,19 @@ func TestSyncCmdForceBypassesFreshCache(t *testing.T) {
 	}
 	if string(data) != "fresh" {
 		t.Fatalf("forced sync file = %q, want fresh", data)
+	}
+}
+
+func TestSyncCmdPropagatesConfigLoadError(t *testing.T) {
+	setupSyncTest(t)
+	origLoad := loadConfigFn
+	loadConfigFn = func(string, string) (*config.Config, error) { return nil, errors.New("cfg") }
+	defer func() { loadConfigFn = origLoad }()
+
+	cmd := syncCmd()
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	if err := cmd.ExecuteContext(context.Background()); err == nil || !strings.Contains(err.Error(), "cfg") {
+		t.Fatalf("syncCmd() error = %v, want cfg error", err)
 	}
 }

@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
+	"github.com/vsync/vsync/internal/config"
 	"github.com/vsync/vsync/internal/crypto"
 	"github.com/vsync/vsync/internal/state"
 	vlt "github.com/vsync/vsync/internal/vault"
@@ -166,5 +169,20 @@ func TestExecCmdInjectsConfiguredEnv(t *testing.T) {
 	cmd.SetArgs([]string{"pi", "--flag"})
 	if err := cmd.ExecuteContext(context.Background()); err != context.Canceled {
 		t.Fatalf("execCmd() error = %v, want context.Canceled", err)
+	}
+}
+
+func TestExecCmdPropagatesConfigLoadError(t *testing.T) {
+	setupExecTest(t)
+	origLoad := loadConfigFn
+	loadConfigFn = func(string, string) (*config.Config, error) { return nil, errors.New("cfg") }
+	defer func() { loadConfigFn = origLoad }()
+
+	cmd := execCmd()
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	cmd.SetArgs([]string{"tool"})
+	if err := cmd.ExecuteContext(context.Background()); err == nil || !strings.Contains(err.Error(), "cfg") {
+		t.Fatalf("execCmd() error = %v, want cfg error", err)
 	}
 }

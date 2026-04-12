@@ -249,6 +249,19 @@ func TestResolveVaultOverrides(t *testing.T) {
 	}
 }
 
+func TestApplyVaultOverridesNil(t *testing.T) {
+	if err := applyVaultOverrides(nil); err != nil {
+		t.Fatalf("applyVaultOverrides(nil) error = %v", err)
+	}
+}
+
+func TestLoadConfigWithOverridesLoadError(t *testing.T) {
+	globalDir := t.TempDir()
+	if _, err := loadConfigWithOverrides(globalDir, ""); err == nil {
+		t.Fatal("loadConfigWithOverrides() error = nil, want read error")
+	}
+}
+
 func TestResolveVaultKVVersionRejectsInvalidValues(t *testing.T) {
 	flagVaultKVVersion = "not-a-number"
 	defer func() { flagVaultKVVersion = "" }()
@@ -258,6 +271,50 @@ func TestResolveVaultKVVersionRejectsInvalidValues(t *testing.T) {
 	flagVaultKVVersion = "3"
 	if _, err := resolveVaultKVVersion(); err == nil {
 		t.Fatal("resolveVaultKVVersion() error = nil, want invalid version error")
+	}
+}
+
+func TestLoadConfigWithOverridesAppliesVaultOverrides(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte("vault:\n  env_prefix: file/env\n  files_prefix: file/files\n  kv_version: 2\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	flagVaultEnvPrefix = "flag/env"
+	flagVaultFilesPrefix = "flag/files"
+	flagVaultKVVersion = "1"
+	defer func() {
+		flagVaultEnvPrefix = ""
+		flagVaultFilesPrefix = ""
+		flagVaultKVVersion = ""
+	}()
+
+	cfg, err := loadConfigWithOverrides(cfgPath, "")
+	if err != nil {
+		t.Fatalf("loadConfigWithOverrides() error = %v", err)
+	}
+	if got, want := cfg.Vault.EnvPrefix, "flag/env"; got != want {
+		t.Fatalf("EnvPrefix = %q, want %q", got, want)
+	}
+	if got, want := cfg.Vault.FilesPrefix, "flag/files"; got != want {
+		t.Fatalf("FilesPrefix = %q, want %q", got, want)
+	}
+	if got, want := cfg.Vault.KVVersion, 1; got != want {
+		t.Fatalf("KVVersion = %d, want %d", got, want)
+	}
+}
+
+func TestLoadConfigWithOverridesRejectsInvalidKVVersion(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte("vault:\n  env_prefix: file/env\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	flagVaultKVVersion = "bad"
+	defer func() { flagVaultKVVersion = "" }()
+	if _, err := loadConfigWithOverrides(cfgPath, ""); err == nil {
+		t.Fatal("loadConfigWithOverrides() error = nil, want invalid kv version error")
 	}
 }
 
@@ -369,9 +426,14 @@ func TestPersistentPreRunSkipsInit(t *testing.T) {
 }
 
 func TestDefaultConfigPathAndDieAndMain(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "xdg-config"))
+	if got, err := defaultGlobalConfigPath(); err != nil || got != filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "vsync", "config.yaml") {
+		t.Fatalf("defaultGlobalConfigPath() with XDG = (%q, %v)", got, err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", "")
+
 	origHome := userHomeDirFn
 	userHomeDirFn = func() (string, error) { return "", errors.New("boom") }
-	t.Setenv("XDG_CONFIG_HOME", "")
 	if _, err := defaultGlobalConfigPath(); err == nil || err.Error() != "boom" {
 		t.Fatalf("defaultGlobalConfigPath() error = %v, want boom", err)
 	}

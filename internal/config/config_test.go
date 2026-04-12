@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -217,6 +218,184 @@ files:
 func TestLoadReportsMissingFile(t *testing.T) {
 	if _, err := Load(filepath.Join(t.TempDir(), "missing.yaml")); err == nil {
 		t.Fatal("Load() error = nil, want missing file error")
+	}
+}
+
+func TestConfigPathsAndMergeConfigCoverage(t *testing.T) {
+	root := t.TempDir()
+	child := filepath.Join(root, "child")
+	grandchild := filepath.Join(child, "grandchild")
+	if err := os.MkdirAll(grandchild, 0755); err != nil {
+		t.Fatal(err)
+	}
+	globalPath := filepath.Join(root, "vsync.yaml")
+	childPath := filepath.Join(child, "vsync.yaml")
+	grandchildPath := filepath.Join(grandchild, "vsync.yaml")
+	for _, p := range []string{globalPath, childPath, grandchildPath} {
+		if err := os.WriteFile(p, []byte("vault:\n  kv_version: 2\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	origWD := workingDirFn
+	origAbs, origStat := absPathFn, statFn
+	workingDirFn = func() (string, error) { return grandchild, nil }
+	defer func() {
+		workingDirFn = origWD
+		absPathFn = origAbs
+		statFn = origStat
+	}()
+
+	absPathFn = func(path string) (string, error) {
+		if strings.Contains(path, "override-fail") {
+			return "", errors.New("abs fail")
+		}
+		return filepath.Abs(path)
+	}
+	statFn = func(path string) (os.FileInfo, error) {
+		if strings.Contains(path, "stat-fail") {
+			return nil, errors.New("stat fail")
+		}
+		return os.Stat(path)
+	}
+
+	paths, err := configPaths(globalPath, globalPath)
+	if err != nil {
+		t.Fatalf("configPaths() error = %v", err)
+	}
+	want := []string{globalPath}
+	if len(paths) != len(want) {
+		t.Fatalf("configPaths() len = %d, want %d (%#v)", len(paths), len(want), paths)
+	}
+	for i := range want {
+		if paths[i] != want[i] {
+			t.Fatalf("configPaths()[%d] = %q, want %q", i, paths[i], want[i])
+		}
+	}
+
+	paths, err = configPaths(globalPath, "")
+	if err != nil {
+		t.Fatalf("configPaths() search error = %v", err)
+	}
+	want = []string{globalPath, childPath, grandchildPath}
+	if len(paths) != len(want) {
+		t.Fatalf("configPaths() search len = %d, want %d (%#v)", len(paths), len(want), paths)
+	}
+	for i := range want {
+		if paths[i] != want[i] {
+			t.Fatalf("configPaths() search[%d] = %q, want %q", i, paths[i], want[i])
+		}
+	}
+
+	overrideFail := filepath.Join(root, "override-fail")
+	if err := os.WriteFile(overrideFail, []byte("vault:\n  kv_version: 2\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	paths, err = configPaths(globalPath, overrideFail)
+	if err != nil {
+		t.Fatalf("configPaths() abs error = %v, want success", err)
+	}
+	if len(paths) != 2 || paths[1] != overrideFail {
+		t.Fatalf("configPaths() abs error paths = %#v, want global + override", paths)
+	}
+
+	statFail := filepath.Join(root, "stat-fail")
+	if err := os.WriteFile(statFail, []byte("vault:\n  kv_version: 2\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := configPaths(globalPath, statFail); err == nil || !strings.Contains(err.Error(), "stat fail") {
+		t.Fatalf("configPaths() stat error = %v, want stat fail", err)
+	}
+
+	cfg := &Config{Vault: VaultConfig{EnvPrefix: "keep"}}
+	mergeConfig(cfg, nil)
+	if got, want := cfg.Vault.EnvPrefix, "keep"; got != want {
+		t.Fatalf("mergeConfig(nil) mutated config: %q", got)
+	}
+}
+
+func TestConfigPathsWorkingDirError(t *testing.T) {
+	origWD := workingDirFn
+	workingDirFn = func() (string, error) { return "", errors.New("wd fail") }
+	defer func() { workingDirFn = origWD }()
+
+	globalPath := filepath.Join(t.TempDir(), "vsync.yaml")
+	if err := os.WriteFile(globalPath, []byte("vault:\n  kv_version: 2\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := configPaths(globalPath, ""); err == nil || err.Error() != "wd fail" {
+		t.Fatalf("configPaths() error = %v, want wd fail", err)
+	}
+}
+
+func TestLoadOrEmptyErrorPaths(t *testing.T) {
+	origWD := workingDirFn
+	workingDirFn = func() (string, error) { return "", errors.New("load wd fail") }
+	defer func() { workingDirFn = origWD }()
+
+	globalPath := filepath.Join(t.TempDir(), "vsync.yaml")
+	if err := os.WriteFile(globalPath, []byte("vault:\n  kv_version: 2\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadOrEmpty("", ""); err == nil || !strings.Contains(err.Error(), "load wd fail") {
+		t.Fatalf("LoadOrEmpty() error = %v, want load wd fail", err)
+	}
+
+	workingDirFn = origWD
+	dir := t.TempDir()
+	if _, err := LoadOrEmpty(dir, ""); err == nil {
+		t.Fatal("LoadOrEmpty(directory) error = nil, want read error")
+	}
+}
+
+func TestConfigPathsErrorBranches(t *testing.T) {
+	origHome := userHomeDirFn
+	origAbs, origStat := absPathFn, statFn
+	defer func() {
+		userHomeDirFn = origHome
+		absPathFn = origAbs
+		statFn = origStat
+	}()
+
+	userHomeDirFn = func() (string, error) { return "", errors.New("home fail") }
+	if _, err := configPaths("", ""); err == nil || !strings.Contains(err.Error(), "home fail") {
+		t.Fatalf("configPaths() home error = %v, want home fail", err)
+	}
+
+	globalPath := filepath.Join(t.TempDir(), "global.yaml")
+	if err := os.WriteFile(globalPath, []byte("vault:\n  kv_version: 2\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	absPathFn = func(path string) (string, error) {
+		return filepath.Abs(path)
+	}
+	statFn = func(path string) (os.FileInfo, error) {
+		if path == globalPath {
+			return nil, errors.New("global stat fail")
+		}
+		return os.Stat(path)
+	}
+	if _, err := configPaths(globalPath, ""); err == nil || !strings.Contains(err.Error(), "global stat fail") {
+		t.Fatalf("configPaths() global stat error = %v, want global stat fail", err)
+	}
+
+	statFn = func(path string) (os.FileInfo, error) {
+		if strings.Contains(path, "vsync.yaml") {
+			return nil, errors.New("local stat fail")
+		}
+		return os.Stat(path)
+	}
+	root := t.TempDir()
+	child := filepath.Join(root, "child")
+	if err := os.MkdirAll(child, 0755); err != nil {
+		t.Fatal(err)
+	}
+	localGlobal := filepath.Join(root, "global.yaml")
+	if err := os.WriteFile(localGlobal, []byte("vault:\n  kv_version: 2\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := configPaths(localGlobal, ""); err == nil || !strings.Contains(err.Error(), "local stat fail") {
+		t.Fatalf("configPaths() local stat error = %v, want local stat fail", err)
 	}
 }
 

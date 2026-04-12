@@ -41,10 +41,7 @@ exec's into a new shell with the shims directory prepended to PATH.`,
 			if err != nil {
 				return err
 			}
-			overrideCfgPath, err := resolveConfigPath()
-			if err != nil {
-				return err
-			}
+			overrideCfgPath, _ := resolveConfigPath()
 			cfg, err := loadConfigFn(globalCfgPath, overrideCfgPath)
 			if err != nil {
 				return err

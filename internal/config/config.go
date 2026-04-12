@@ -11,6 +11,8 @@ import (
 
 var userHomeDirFn = os.UserHomeDir
 var workingDirFn = os.Getwd
+var absPathFn = filepath.Abs
+var statFn = os.Stat
 
 // DefaultGlobalConfigPath returns the default global config file path.
 func DefaultGlobalConfigPath() (string, error) {
@@ -153,14 +155,14 @@ func configPaths(globalPath, overridePath string) ([]string, error) {
 	paths := []string{}
 	seen := map[string]struct{}{}
 	add := func(path string) error {
-		abs, err := filepath.Abs(path)
+		abs, err := absPathFn(path)
 		if err != nil {
 			abs = filepath.Clean(path)
 		}
 		if _, ok := seen[abs]; ok {
 			return nil
 		}
-		if _, err := os.Stat(path); err != nil {
+		if _, err := statFn(path); err != nil {
 			if os.IsNotExist(err) {
 				return nil
 			}
