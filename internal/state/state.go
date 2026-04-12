@@ -9,10 +9,10 @@ import (
 
 // Dirs holds the canonical paths under the vsync state and cache directories.
 type Dirs struct {
-	Base   string // ~/.local/state/vsync, $XDG_STATE_DIR/vsync, or $VSYNC_STATE_DIR
+	Base   string // ~/.local/state/vsync, $XDG_STATE_HOME/vsync, or $VSYNC_STATE_DIR
 	Keys   string // .../keys
 	Tokens string // .../tokens
-	Cache  string // ~/.cache/vsync, $XDG_CACHE_DIR/vsync, or $VSYNC_CACHE_DIR
+	Cache  string // ~/.cache/vsync, $XDG_CACHE_HOME/vsync, or $VSYNC_CACHE_DIR
 	Shims  string // .../shims
 }
 
@@ -24,13 +24,13 @@ var fileCloseFn = func(f *os.File) error { return f.Close() }
 var renameFn = os.Rename
 
 // DefaultDirs returns the standard state and cache directories, honoring
-// VSYNC_STATE_DIR / XDG_STATE_DIR for state and VSYNC_CACHE_DIR / XDG_CACHE_DIR
+// VSYNC_STATE_DIR / XDG_STATE_HOME for state and VSYNC_CACHE_DIR / XDG_CACHE_HOME
 // for cache, with home-directory fallbacks.
 func DefaultDirs() (*Dirs, error) {
 	stateBase := os.Getenv("VSYNC_STATE_DIR")
 	if stateBase == "" {
-		if xdgStateDir := os.Getenv("XDG_STATE_DIR"); xdgStateDir != "" {
-			stateBase = filepath.Join(xdgStateDir, "vsync")
+		if xdgStateHome := os.Getenv("XDG_STATE_HOME"); xdgStateHome != "" {
+			stateBase = filepath.Join(xdgStateHome, "vsync")
 		} else {
 			home, err := userHomeDirFn()
 			if err != nil {
@@ -42,8 +42,8 @@ func DefaultDirs() (*Dirs, error) {
 
 	cacheBase := os.Getenv("VSYNC_CACHE_DIR")
 	if cacheBase == "" {
-		if xdgCacheDir := os.Getenv("XDG_CACHE_DIR"); xdgCacheDir != "" {
-			cacheBase = filepath.Join(xdgCacheDir, "vsync")
+		if xdgCacheHome := os.Getenv("XDG_CACHE_HOME"); xdgCacheHome != "" {
+			cacheBase = filepath.Join(xdgCacheHome, "vsync")
 		} else {
 			home, err := userHomeDirFn()
 			if err != nil {

@@ -31,12 +31,12 @@ vsync keeps its long-lived state and its secret cache in separate locations.
 
 The **state directory** is resolved in this order:
 1. `VSYNC_STATE_DIR` if set (full override)
-2. `XDG_STATE_DIR/vsync` if `XDG_STATE_DIR` is set
+2. `XDG_STATE_HOME/vsync` if `XDG_STATE_HOME` is set
 3. `~/.local/state/vsync` as the fallback
 
 The **cache directory** is resolved independently:
 1. `VSYNC_CACHE_DIR` if set (full override)
-2. `XDG_CACHE_DIR/vsync` if `XDG_CACHE_DIR` is set
+2. `XDG_CACHE_HOME/vsync` if `XDG_CACHE_HOME` is set
 3. `~/.cache/vsync` as the fallback
 
 All paths below refer to those resolved directories.

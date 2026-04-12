@@ -123,9 +123,9 @@ vsync init --vault-addr https://vault.example.com --vault-token hvs.xxx
 ```
 
 If you want vsync to store its state somewhere other than the default, set
-`VSYNC_STATE_DIR` for a full override or `XDG_STATE_DIR` to use `$XDG_STATE_DIR/vsync`
+`VSYNC_STATE_DIR` for a full override or `XDG_STATE_HOME` to use `$XDG_STATE_HOME/vsync`
 before running `vsync init`. To move only the cache, set `VSYNC_CACHE_DIR` or
-`XDG_CACHE_DIR` before running `vsync init`.
+`XDG_CACHE_HOME` before running `vsync init`.
 
 ### 4. Enter the vsync shell
 
@@ -338,12 +338,12 @@ vsync keeps its long-lived state and its secret cache in separate locations.
 
 The **state directory** is resolved in this order:
 1. `VSYNC_STATE_DIR` if set (full override)
-2. `XDG_STATE_DIR/vsync` if `XDG_STATE_DIR` is set
+2. `XDG_STATE_HOME/vsync` if `XDG_STATE_HOME` is set
 3. `~/.local/state/vsync` as the fallback
 
 The **cache directory** is resolved independently:
 1. `VSYNC_CACHE_DIR` if set (full override)
-2. `XDG_CACHE_DIR/vsync` if `XDG_CACHE_DIR` is set
+2. `XDG_CACHE_HOME/vsync` if `XDG_CACHE_HOME` is set
 3. `~/.cache/vsync` as the fallback
 
 ```

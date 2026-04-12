@@ -32,8 +32,8 @@ func rootCmd() *cobra.Command {
 		Long: `vsync creates an encrypted local cache of Vault credentials and launches a shell
 where configured commands are shimmed to automatically inject secrets from Vault.
 
-State lives under VSYNC_STATE_DIR / XDG_STATE_DIR / ~/.local/state/vsync, while the
-secret cache lives under VSYNC_CACHE_DIR / XDG_CACHE_DIR / ~/.cache/vsync.`,
+State lives under VSYNC_STATE_DIR / XDG_STATE_HOME / ~/.local/state/vsync, while the
+secret cache lives under VSYNC_CACHE_DIR / XDG_CACHE_HOME / ~/.cache/vsync.`,
 		SilenceUsage: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			// Skip for init subcommand (bootstraps dirs itself).

@@ -97,7 +97,7 @@ All day-to-day operations go through `mise run <task>`:
 
 ### `internal/state`
 
-Owns **all paths** under the resolved vsync state directory (`VSYNC_STATE_DIR`, `XDG_STATE_DIR/vsync`, or fallback `~/.local/state/vsync`) and cache directory (`VSYNC_CACHE_DIR`, `XDG_CACHE_DIR/vsync`, or fallback `~/.cache/vsync`). Never hard-code those paths elsewhere.
+Owns **all paths** under the resolved vsync state directory (`VSYNC_STATE_DIR`, `XDG_STATE_HOME/vsync`, or fallback `~/.local/state/vsync`) and cache directory (`VSYNC_CACHE_DIR`, `XDG_CACHE_HOME/vsync`, or fallback `~/.cache/vsync`). Never hard-code those paths elsewhere.
 
 Key API:
 ```go
@@ -368,9 +368,9 @@ pi ...
 | `VAULT_TOKEN` | User / CI | `cmd_init`, `root.go` resolver |
 | `VSYNC_CONFIG` | User | `root.go` (config path override) |
 | `VSYNC_STATE_DIR` | User / CI | `internal/state.DefaultDirs` full override for the vsync state directory |
-| `XDG_STATE_DIR` | User / CI | `internal/state.DefaultDirs` parent for the vsync state directory (`$XDG_STATE_DIR/vsync`) |
+| `XDG_STATE_HOME` | User / CI | `internal/state.DefaultDirs` parent for the vsync state directory (`$XDG_STATE_HOME/vsync`) |
 | `VSYNC_CACHE_DIR` | User / CI | `internal/state.DefaultDirs` full override for the cache directory |
-| `XDG_CACHE_DIR` | User / CI | `internal/state.DefaultDirs` parent for the cache directory (`$XDG_CACHE_DIR/vsync`) |
+| `XDG_CACHE_HOME` | User / CI | `internal/state.DefaultDirs` parent for the cache directory (`$XDG_CACHE_HOME/vsync`) |
 | `VSYNC_KEY` | `vsync shell` at launch | Shims → `vsync exec` to locate the key file |
 | `VSYNC_ACTIVE` | `vsync shell` at launch | Prevents nested shell invocations |
 | `VAULT_DEV_ROOT_TOKEN_ID` | `devenv.nix` | Consumed by `vault server -dev` in the integration test environment |

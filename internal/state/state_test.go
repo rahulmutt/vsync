@@ -10,9 +10,9 @@ import (
 func TestDefaultDirsUsesHome(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("XDG_STATE_DIR", "")
+	t.Setenv("XDG_STATE_HOME", "")
 	t.Setenv("VSYNC_STATE_DIR", "")
-	t.Setenv("XDG_CACHE_DIR", "")
+	t.Setenv("XDG_CACHE_HOME", "")
 	t.Setenv("VSYNC_CACHE_DIR", "")
 
 	dirs, err := DefaultDirs()
@@ -44,9 +44,9 @@ func TestDefaultDirsUsesHome(t *testing.T) {
 func TestDefaultDirsUsesXDGStateDir(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	xdgStateDir := filepath.Join(t.TempDir(), "state")
-	t.Setenv("XDG_STATE_DIR", xdgStateDir)
+	t.Setenv("XDG_STATE_HOME", xdgStateDir)
 	t.Setenv("VSYNC_STATE_DIR", "")
-	t.Setenv("XDG_CACHE_DIR", "")
+	t.Setenv("XDG_CACHE_HOME", "")
 	t.Setenv("VSYNC_CACHE_DIR", "")
 
 	dirs, err := DefaultDirs()
@@ -64,10 +64,10 @@ func TestDefaultDirsUsesXDGStateDir(t *testing.T) {
 
 func TestDefaultDirsUsesXDGCacheDir(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	t.Setenv("XDG_STATE_DIR", "")
+	t.Setenv("XDG_STATE_HOME", "")
 	t.Setenv("VSYNC_STATE_DIR", "")
 	xdgCacheDir := filepath.Join(t.TempDir(), "cache")
-	t.Setenv("XDG_CACHE_DIR", xdgCacheDir)
+	t.Setenv("XDG_CACHE_HOME", xdgCacheDir)
 	t.Setenv("VSYNC_CACHE_DIR", "")
 
 	dirs, err := DefaultDirs()
@@ -85,9 +85,9 @@ func TestDefaultDirsUsesXDGCacheDir(t *testing.T) {
 
 func TestDefaultDirsUsesVsyncCacheDirOverride(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	t.Setenv("XDG_STATE_DIR", "")
+	t.Setenv("XDG_STATE_HOME", "")
 	t.Setenv("VSYNC_STATE_DIR", "")
-	t.Setenv("XDG_CACHE_DIR", filepath.Join(t.TempDir(), "xdg-cache"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(t.TempDir(), "xdg-cache"))
 	vsyncCacheDir := filepath.Join(t.TempDir(), "custom-vsync-cache")
 	t.Setenv("VSYNC_CACHE_DIR", vsyncCacheDir)
 
@@ -106,10 +106,10 @@ func TestDefaultDirsUsesVsyncCacheDirOverride(t *testing.T) {
 func TestDefaultDirsUsesVsyncStateDirOverride(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	t.Setenv("XDG_STATE_DIR", filepath.Join(t.TempDir(), "xdg-state"))
+	t.Setenv("XDG_STATE_HOME", filepath.Join(t.TempDir(), "xdg-state"))
 	vsyncStateDir := filepath.Join(t.TempDir(), "custom-vsync-state")
 	t.Setenv("VSYNC_STATE_DIR", vsyncStateDir)
-	t.Setenv("XDG_CACHE_DIR", "")
+	t.Setenv("XDG_CACHE_HOME", "")
 	t.Setenv("VSYNC_CACHE_DIR", "")
 
 	dirs, err := DefaultDirs()
@@ -183,7 +183,7 @@ func TestWriteAtomicWritesContentAndMode(t *testing.T) {
 }
 
 func TestDefaultDirsAndWriteAtomicErrorPaths(t *testing.T) {
-	t.Setenv("XDG_STATE_DIR", "")
+	t.Setenv("XDG_STATE_HOME", "")
 	t.Setenv("VSYNC_STATE_DIR", "")
 	origHome := userHomeDirFn
 	userHomeDirFn = func() (string, error) { return "", errors.New("no home") }
