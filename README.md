@@ -46,7 +46,7 @@ $ aws s3 ls                # AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY injected 
 ```sh
 git clone https://github.com/vsync/vsync
 cd vsync
-mise install     # pins and installs Go 1.25
+mise install     # pins and installs Go 1.26
 mise run build   # produces dist/vsync
 cp dist/vsync /usr/local/bin/vsync
 ```
