@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/vsync/vsync/internal/crypto"
@@ -69,10 +70,7 @@ func DeleteCache(dirs *state.Dirs, kind, name string) error {
 
 // ClearCacheKind removes all cache entries of the given kind ("env" or "files").
 func ClearCacheKind(dirs *state.Dirs, kind string) error {
-	dir := dirs.CacheFile(kind, "")
-	// CacheFile appends .enc to name; for the dir we need to strip trailing .enc
-	// Actually use the Cache dir directly.
-	cacheDir := fmt.Sprintf("%s/%s", dirs.Cache, kind)
+	cacheDir := filepath.Join(dirs.Cache, kind)
 	entries, err := os.ReadDir(cacheDir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -80,9 +78,8 @@ func ClearCacheKind(dirs *state.Dirs, kind string) error {
 		}
 		return err
 	}
-	_ = dir
 	for _, e := range entries {
-		_ = os.Remove(fmt.Sprintf("%s/%s", cacheDir, e.Name()))
+		_ = os.Remove(filepath.Join(cacheDir, e.Name()))
 	}
 	return nil
 }

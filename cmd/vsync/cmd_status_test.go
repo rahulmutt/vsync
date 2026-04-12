@@ -130,6 +130,7 @@ func TestStatusCmdReportsConfiguredState(t *testing.T) {
 	for _, want := range []string{
 		"=== vsync status ===",
 		"Vault address:",
+		"Cache dir:",
 		"Token TTL:",
 		"Configured commands (1):",
 		"pi",

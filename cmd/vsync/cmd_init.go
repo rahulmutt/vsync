@@ -120,6 +120,7 @@ without exposing credentials in plain text.`,
 			}
 
 			fmt.Printf("vsync: credentials stored at %s\n", dirs.Tokens)
+			fmt.Printf("vsync: cache stored at       %s\n", dirs.Cache)
 			fmt.Printf("vsync: encryption key at     %s\n", keyPath)
 			return nil
 		},

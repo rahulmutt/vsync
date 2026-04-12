@@ -17,7 +17,7 @@ Write a SPEC.md for the following:
       key: pi-agent-auth
 
     
-  This config means that in the new shell environment, the `pi` command is shimmed to fetch the `gemini-api-key` from HashiCorp Vault (the default prefix path should be configurable), set it to the `GEMINI_API_KEY` environment variable and then exec into the `pi` program that is further in the path. Vault connection is done by decrypting the stored tokens above at ~/.local/state/vsync/tokens/* and connecting to vault and getting back the values. Secrets should be cached when possible (taking into account their expiries from vault) and stored encrypted using the key above in ~/.local/state/vsync/tokens/*
+  This config means that in the new shell environment, the `pi` command is shimmed to fetch the `gemini-api-key` from HashiCorp Vault (the default prefix path should be configurable), set it to the `GEMINI_API_KEY` environment variable and then exec into the `pi` program that is further in the path. Vault connection is done by decrypting the stored tokens above at ~/.local/state/vsync/tokens/* and connecting to vault and getting back the values. Secrets should be cached when possible (taking into account their expiries from vault) and stored encrypted under the cache directory (for example `~/.cache/vsync/*`, or the configured override).
   It also automatically syncs the files in the files key from vault, so it fetches `pi-agent-auth` (files vault key prefix should also be configurable) from vault and stores the value directly in the `path` so in this case `~/.pi/agent/auth.json`.
   There should be a separate vault kv prefix for env vars and files.
 

@@ -97,16 +97,16 @@ All day-to-day operations go through `mise run <task>`:
 
 ### `internal/state`
 
-Owns **all paths** under the resolved vsync state directory (`VSYNC_STATE_DIR`, `XDG_STATE_DIR/vsync`, or fallback `~/.local/state/vsync`). Never hard-code those paths elsewhere.
+Owns **all paths** under the resolved vsync state directory (`VSYNC_STATE_DIR`, `XDG_STATE_DIR/vsync`, or fallback `~/.local/state/vsync`) and cache directory (`VSYNC_CACHE_DIR`, `XDG_CACHE_DIR/vsync`, or fallback `~/.cache/vsync`). Never hard-code those paths elsewhere.
 
 Key API:
 ```go
 dirs, _ := state.DefaultDirs()
-dirs.KeyFile()              // <state dir>/keys/default.key
-dirs.TokenFile("vault_addr") // <state dir>/tokens/vault_addr.enc
-dirs.CacheFile("env", "gemini-api-key") // <state dir>/cache/env/gemini-api-key.enc
-dirs.ShimFile("pi")         // <state dir>/shims/pi
-dirs.EnsureAll()            // create all directories (mode 0700)
+dirs.KeyFile()               // <state dir>/keys/default.key
+dirs.TokenFile("vault_addr")  // <state dir>/tokens/vault_addr.enc
+dirs.CacheFile("env", "gemini-api-key") // <cache dir>/env/gemini-api-key.enc
+dirs.ShimFile("pi")          // <state dir>/shims/pi
+dirs.EnsureAll()             // create all directories (mode 0700)
 state.WriteAtomic(path, data, 0600) // write to tmp then rename
 ```
 
@@ -331,7 +331,7 @@ Implementation notes for agents modifying `devenv.nix`:
 vsync shell
   └─ load config (~/.config/vsync/config.yaml)
   └─ decrypt vault creds (tokens/*.enc) with key (keys/default.key)
-  └─ sync files from Vault → local paths (cache/files/*.enc)
+  └─ sync files from Vault → local paths (<cache dir>/files/*.enc)
   └─ write shims (shims/<cmd>) → #!/bin/sh exec vsync exec <cmd> "$@"
   └─ syscall.Exec(shell) with PATH=shims:$PATH, VSYNC_ACTIVE=1, VSYNC_KEY=...
 
@@ -340,7 +340,7 @@ pi ...
   └─ shims/pi is resolved first in PATH
   └─ shims/pi → exec vsync exec pi "$@"
       └─ find "pi" entry in config.env.commands
-      └─ for each variable: check cache/env/<key>.enc → Vault if expired
+      └─ for each variable: check <cache dir>/env/<key>.enc → Vault if expired
       └─ syscall.Exec(real pi binary) with GEMINI_API_KEY=... injected
 ```
 
@@ -369,6 +369,8 @@ pi ...
 | `VSYNC_CONFIG` | User | `root.go` (config path override) |
 | `VSYNC_STATE_DIR` | User / CI | `internal/state.DefaultDirs` full override for the vsync state directory |
 | `XDG_STATE_DIR` | User / CI | `internal/state.DefaultDirs` parent for the vsync state directory (`$XDG_STATE_DIR/vsync`) |
+| `VSYNC_CACHE_DIR` | User / CI | `internal/state.DefaultDirs` full override for the cache directory |
+| `XDG_CACHE_DIR` | User / CI | `internal/state.DefaultDirs` parent for the cache directory (`$XDG_CACHE_DIR/vsync`) |
 | `VSYNC_KEY` | `vsync shell` at launch | Shims → `vsync exec` to locate the key file |
 | `VSYNC_ACTIVE` | `vsync shell` at launch | Prevents nested shell invocations |
 | `VAULT_DEV_ROOT_TOKEN_ID` | `devenv.nix` | Consumed by `vault server -dev` in the integration test environment |

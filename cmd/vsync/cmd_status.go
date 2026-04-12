@@ -21,12 +21,13 @@ func statusCmd() *cobra.Command {
 
 			fmt.Println("=== vsync status ===")
 
-			// Key file.
+			// Paths.
 			keyPath := dirs.KeyFile()
 			if flagKeyPath != "" {
 				keyPath = flagKeyPath
 			}
 			printField("Key file", keyPath)
+			printField("Cache dir", dirs.Cache)
 
 			// Vault address.
 			creds, err := loadCredsFn(dirs, key, resolveVaultAddr(), resolveVaultToken())

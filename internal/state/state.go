@@ -7,12 +7,12 @@ import (
 	"path/filepath"
 )
 
-// Dirs holds the canonical paths under the vsync state directory.
+// Dirs holds the canonical paths under the vsync state and cache directories.
 type Dirs struct {
 	Base   string // ~/.local/state/vsync, $XDG_STATE_DIR/vsync, or $VSYNC_STATE_DIR
 	Keys   string // .../keys
 	Tokens string // .../tokens
-	Cache  string // .../cache
+	Cache  string // ~/.cache/vsync, $XDG_CACHE_DIR/vsync, or $VSYNC_CACHE_DIR
 	Shims  string // .../shims
 }
 
@@ -23,33 +23,48 @@ var fileWriteFn = func(f *os.File, data []byte) (int, error) { return f.Write(da
 var fileCloseFn = func(f *os.File) error { return f.Close() }
 var renameFn = os.Rename
 
-// DefaultDirs returns the standard state directories, honoring VSYNC_STATE_DIR
-// as a full override and XDG_STATE_DIR as the state root parent.
+// DefaultDirs returns the standard state and cache directories, honoring
+// VSYNC_STATE_DIR / XDG_STATE_DIR for state and VSYNC_CACHE_DIR / XDG_CACHE_DIR
+// for cache, with home-directory fallbacks.
 func DefaultDirs() (*Dirs, error) {
-	base := os.Getenv("VSYNC_STATE_DIR")
-	if base == "" {
+	stateBase := os.Getenv("VSYNC_STATE_DIR")
+	if stateBase == "" {
 		if xdgStateDir := os.Getenv("XDG_STATE_DIR"); xdgStateDir != "" {
-			base = filepath.Join(xdgStateDir, "vsync")
+			stateBase = filepath.Join(xdgStateDir, "vsync")
 		} else {
 			home, err := userHomeDirFn()
 			if err != nil {
 				return nil, fmt.Errorf("cannot determine home directory: %w", err)
 			}
-			base = filepath.Join(home, ".local", "state", "vsync")
+			stateBase = filepath.Join(home, ".local", "state", "vsync")
 		}
 	}
+
+	cacheBase := os.Getenv("VSYNC_CACHE_DIR")
+	if cacheBase == "" {
+		if xdgCacheDir := os.Getenv("XDG_CACHE_DIR"); xdgCacheDir != "" {
+			cacheBase = filepath.Join(xdgCacheDir, "vsync")
+		} else {
+			home, err := userHomeDirFn()
+			if err != nil {
+				return nil, fmt.Errorf("cannot determine home directory: %w", err)
+			}
+			cacheBase = filepath.Join(home, ".cache", "vsync")
+		}
+	}
+
 	return &Dirs{
-		Base:   base,
-		Keys:   filepath.Join(base, "keys"),
-		Tokens: filepath.Join(base, "tokens"),
-		Cache:  filepath.Join(base, "cache"),
-		Shims:  filepath.Join(base, "shims"),
+		Base:   stateBase,
+		Keys:   filepath.Join(stateBase, "keys"),
+		Tokens: filepath.Join(stateBase, "tokens"),
+		Cache:  cacheBase,
+		Shims:  filepath.Join(stateBase, "shims"),
 	}, nil
 }
 
-// EnsureAll creates all state directories with mode 0700.
+// EnsureAll creates all state and cache directories with mode 0700.
 func (d *Dirs) EnsureAll() error {
-	for _, dir := range []string{d.Keys, d.Tokens,
+	for _, dir := range []string{d.Keys, d.Tokens, d.Cache,
 		filepath.Join(d.Cache, "env"),
 		filepath.Join(d.Cache, "files"),
 		d.Shims,
@@ -71,7 +86,7 @@ func (d *Dirs) TokenFile(name string) string {
 	return filepath.Join(d.Tokens, name+".enc")
 }
 
-// CacheFile returns the path for an encrypted cache entry.
+// CacheFile returns the path for an encrypted cache entry under the cache dir.
 func (d *Dirs) CacheFile(kind, name string) string {
 	return filepath.Join(d.Cache, kind, name+".enc")
 }

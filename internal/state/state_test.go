@@ -12,25 +12,31 @@ func TestDefaultDirsUsesHome(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_STATE_DIR", "")
 	t.Setenv("VSYNC_STATE_DIR", "")
+	t.Setenv("XDG_CACHE_DIR", "")
+	t.Setenv("VSYNC_CACHE_DIR", "")
 
 	dirs, err := DefaultDirs()
 	if err != nil {
 		t.Fatalf("DefaultDirs() error = %v", err)
 	}
-	wantBase := filepath.Join(home, ".local", "state", "vsync")
-	if dirs.Base != wantBase {
-		t.Fatalf("Base = %q, want %q", dirs.Base, wantBase)
+	wantStateBase := filepath.Join(home, ".local", "state", "vsync")
+	if dirs.Base != wantStateBase {
+		t.Fatalf("Base = %q, want %q", dirs.Base, wantStateBase)
 	}
-	if got, want := dirs.KeyFile(), filepath.Join(wantBase, "keys", "default.key"); got != want {
+	wantCacheBase := filepath.Join(home, ".cache", "vsync")
+	if dirs.Cache != wantCacheBase {
+		t.Fatalf("Cache = %q, want %q", dirs.Cache, wantCacheBase)
+	}
+	if got, want := dirs.KeyFile(), filepath.Join(wantStateBase, "keys", "default.key"); got != want {
 		t.Fatalf("KeyFile() = %q, want %q", got, want)
 	}
-	if got, want := dirs.TokenFile("vault_addr"), filepath.Join(wantBase, "tokens", "vault_addr.enc"); got != want {
+	if got, want := dirs.TokenFile("vault_addr"), filepath.Join(wantStateBase, "tokens", "vault_addr.enc"); got != want {
 		t.Fatalf("TokenFile() = %q, want %q", got, want)
 	}
-	if got, want := dirs.CacheFile("env", "gemini"), filepath.Join(wantBase, "cache", "env", "gemini.enc"); got != want {
+	if got, want := dirs.CacheFile("env", "gemini"), filepath.Join(wantCacheBase, "env", "gemini.enc"); got != want {
 		t.Fatalf("CacheFile() = %q, want %q", got, want)
 	}
-	if got, want := dirs.ShimFile("pi"), filepath.Join(wantBase, "shims", "pi"); got != want {
+	if got, want := dirs.ShimFile("pi"), filepath.Join(wantStateBase, "shims", "pi"); got != want {
 		t.Fatalf("ShimFile() = %q, want %q", got, want)
 	}
 }
@@ -40,6 +46,8 @@ func TestDefaultDirsUsesXDGStateDir(t *testing.T) {
 	xdgStateDir := filepath.Join(t.TempDir(), "state")
 	t.Setenv("XDG_STATE_DIR", xdgStateDir)
 	t.Setenv("VSYNC_STATE_DIR", "")
+	t.Setenv("XDG_CACHE_DIR", "")
+	t.Setenv("VSYNC_CACHE_DIR", "")
 
 	dirs, err := DefaultDirs()
 	if err != nil {
@@ -54,11 +62,55 @@ func TestDefaultDirsUsesXDGStateDir(t *testing.T) {
 	}
 }
 
-func TestDefaultDirsUsesVsyncStateDirOverride(t *testing.T) {
+func TestDefaultDirsUsesXDGCacheDir(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_STATE_DIR", "")
+	t.Setenv("VSYNC_STATE_DIR", "")
+	xdgCacheDir := filepath.Join(t.TempDir(), "cache")
+	t.Setenv("XDG_CACHE_DIR", xdgCacheDir)
+	t.Setenv("VSYNC_CACHE_DIR", "")
+
+	dirs, err := DefaultDirs()
+	if err != nil {
+		t.Fatalf("DefaultDirs() error = %v", err)
+	}
+	wantCache := filepath.Join(xdgCacheDir, "vsync")
+	if dirs.Cache != wantCache {
+		t.Fatalf("Cache = %q, want %q", dirs.Cache, wantCache)
+	}
+	if got, want := dirs.CacheFile("files", "pi-agent-auth"), filepath.Join(wantCache, "files", "pi-agent-auth.enc"); got != want {
+		t.Fatalf("CacheFile() = %q, want %q", got, want)
+	}
+}
+
+func TestDefaultDirsUsesVsyncCacheDirOverride(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("XDG_STATE_DIR", "")
+	t.Setenv("VSYNC_STATE_DIR", "")
+	t.Setenv("XDG_CACHE_DIR", filepath.Join(t.TempDir(), "xdg-cache"))
+	vsyncCacheDir := filepath.Join(t.TempDir(), "custom-vsync-cache")
+	t.Setenv("VSYNC_CACHE_DIR", vsyncCacheDir)
+
+	dirs, err := DefaultDirs()
+	if err != nil {
+		t.Fatalf("DefaultDirs() error = %v", err)
+	}
+	if dirs.Cache != vsyncCacheDir {
+		t.Fatalf("Cache = %q, want %q", dirs.Cache, vsyncCacheDir)
+	}
+	if got, want := dirs.CacheFile("env", "gemini"), filepath.Join(vsyncCacheDir, "env", "gemini.enc"); got != want {
+		t.Fatalf("CacheFile() = %q, want %q", got, want)
+	}
+}
+
+func TestDefaultDirsUsesVsyncStateDirOverride(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
 	t.Setenv("XDG_STATE_DIR", filepath.Join(t.TempDir(), "xdg-state"))
 	vsyncStateDir := filepath.Join(t.TempDir(), "custom-vsync-state")
 	t.Setenv("VSYNC_STATE_DIR", vsyncStateDir)
+	t.Setenv("XDG_CACHE_DIR", "")
+	t.Setenv("VSYNC_CACHE_DIR", "")
 
 	dirs, err := DefaultDirs()
 	if err != nil {
@@ -67,23 +119,27 @@ func TestDefaultDirsUsesVsyncStateDirOverride(t *testing.T) {
 	if dirs.Base != vsyncStateDir {
 		t.Fatalf("Base = %q, want %q", dirs.Base, vsyncStateDir)
 	}
-	if got, want := dirs.CacheFile("env", "gemini"), filepath.Join(vsyncStateDir, "cache", "env", "gemini.enc"); got != want {
+	if got, want := dirs.Cache, filepath.Join(home, ".cache", "vsync"); got != want {
+		t.Fatalf("Cache = %q, want %q", got, want)
+	}
+	if got, want := dirs.CacheFile("env", "gemini"), filepath.Join(home, ".cache", "vsync", "env", "gemini.enc"); got != want {
 		t.Fatalf("CacheFile() = %q, want %q", got, want)
 	}
 }
 
 func TestEnsureAllCreatesDirectories(t *testing.T) {
+	base := t.TempDir()
 	dirs := &Dirs{
-		Base:   filepath.Join(t.TempDir(), "base"),
-		Keys:   filepath.Join(t.TempDir(), "keys"),
-		Tokens: filepath.Join(t.TempDir(), "tokens"),
-		Cache:  filepath.Join(t.TempDir(), "cache"),
-		Shims:  filepath.Join(t.TempDir(), "shims"),
+		Base:   filepath.Join(base, "base"),
+		Keys:   filepath.Join(base, "keys"),
+		Tokens: filepath.Join(base, "tokens"),
+		Cache:  filepath.Join(base, "cache"),
+		Shims:  filepath.Join(base, "shims"),
 	}
 	if err := dirs.EnsureAll(); err != nil {
 		t.Fatalf("EnsureAll() error = %v", err)
 	}
-	for _, dir := range []string{dirs.Keys, dirs.Tokens, filepath.Join(dirs.Cache, "env"), filepath.Join(dirs.Cache, "files"), dirs.Shims} {
+	for _, dir := range []string{dirs.Cache, dirs.Keys, dirs.Tokens, filepath.Join(dirs.Cache, "env"), filepath.Join(dirs.Cache, "files"), dirs.Shims} {
 		info, err := os.Stat(dir)
 		if err != nil {
 			t.Fatalf("Stat(%s) error = %v", dir, err)

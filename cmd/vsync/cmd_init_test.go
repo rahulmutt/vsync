@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net/http"
@@ -69,6 +70,33 @@ func TestInitCmdStoresCredentialsAndUsesProvidedEnv(t *testing.T) {
 	defer server.Close()
 	flagVaultAddr = server.URL
 
+	var stdout bytes.Buffer
+	oldOut, oldErr := os.Stdout, os.Stderr
+	rOut, wOut, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rErr, wErr, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = wOut
+	os.Stderr = wErr
+	defer func() {
+		os.Stdout = oldOut
+		os.Stderr = oldErr
+	}()
+	outC := make(chan string, 1)
+	errC := make(chan string, 1)
+	go func() {
+		data, _ := io.ReadAll(rOut)
+		outC <- string(data)
+	}()
+	go func() {
+		data, _ := io.ReadAll(rErr)
+		errC <- string(data)
+	}()
+
 	cmd := initCmd()
 	cmd.SilenceErrors = true
 	cmd.SilenceUsage = true
@@ -76,6 +104,10 @@ func TestInitCmdStoresCredentialsAndUsesProvidedEnv(t *testing.T) {
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("initCmd() error = %v", err)
 	}
+	_ = wOut.Close()
+	_ = wErr.Close()
+	stdout.WriteString(<-outC)
+	stdout.WriteString(<-errC)
 
 	if _, err := os.Stat(keyPath); err != nil {
 		t.Fatalf("key file missing: %v", err)
@@ -90,6 +122,9 @@ func TestInitCmdStoresCredentialsAndUsesProvidedEnv(t *testing.T) {
 	}
 	if creds.Addr != server.URL || creds.Token != "dev-token" {
 		t.Fatalf("stored creds = %#v", creds)
+	}
+	if !strings.Contains(stdout.String(), "cache stored at") {
+		t.Fatalf("init output missing cache dir line:\n%s", stdout.String())
 	}
 }
 

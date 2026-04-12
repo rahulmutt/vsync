@@ -111,6 +111,7 @@ vsync init
 # Vault token (VAULT_TOKEN): ••••••••
 # vsync: verifying vault connectivity… ✓
 # vsync: credentials stored at <state dir>/tokens
+# vsync: cache stored at       <cache dir>
 # vsync: encryption key at     <state dir>/keys/default.key
 ```
 
@@ -123,7 +124,8 @@ vsync init --vault-addr https://vault.example.com --vault-token hvs.xxx
 
 If you want vsync to store its state somewhere other than the default, set
 `VSYNC_STATE_DIR` for a full override or `XDG_STATE_DIR` to use `$XDG_STATE_DIR/vsync`
-before running `vsync init`.
+before running `vsync init`. To move only the cache, set `VSYNC_CACHE_DIR` or
+`XDG_CACHE_DIR` before running `vsync init`.
 
 ### 4. Enter the vsync shell
 
@@ -257,8 +259,8 @@ vsync sync --force              # bypass cache, re-fetch everything
 
 ### `vsync status`
 
-Show the current state of vsync: key file, vault connectivity, token TTL, shim presence,
-and cache expiry for every configured secret.
+Show the current state of vsync: key file, cache directory, vault connectivity,
+token TTL, shim presence, and cache expiry for every configured secret.
 
 ```
 vsync status
@@ -269,6 +271,7 @@ Example output:
 ```
 === vsync status ===
   Key file:            <state dir>/keys/default.key
+  Cache dir:           ~/.cache/vsync
   Vault address:       https://vault.example.com
   Token TTL:           11h59m42s
   Config file:         ~/.config/vsync/config.yaml
@@ -288,7 +291,7 @@ File sync entries (1):
 
 ### `vsync cache clear`
 
-Remove cached secrets to force a fresh fetch from Vault on the next use.
+Remove cached secrets from the resolved cache directory to force a fresh fetch from Vault on the next use.
 
 ```
 vsync cache clear [--all] [--env] [--files] [--key <name>]
@@ -306,6 +309,9 @@ vsync cache clear --all
 vsync cache clear --env
 vsync cache clear --key gemini-api-key
 vsync cache clear --files --key pi-agent-auth
+
+# With a custom cache directory
+VSYNC_CACHE_DIR=/tmp/vsync-cache vsync cache clear --env
 ```
 
 ---
@@ -328,10 +334,17 @@ encrypted values stored by `vsync init`.
 
 ## Where things are stored
 
-The vsync state directory is resolved in this order:
+vsync keeps its long-lived state and its secret cache in separate locations.
+
+The **state directory** is resolved in this order:
 1. `VSYNC_STATE_DIR` if set (full override)
 2. `XDG_STATE_DIR/vsync` if `XDG_STATE_DIR` is set
 3. `~/.local/state/vsync` as the fallback
+
+The **cache directory** is resolved independently:
+1. `VSYNC_CACHE_DIR` if set (full override)
+2. `XDG_CACHE_DIR/vsync` if `XDG_CACHE_DIR` is set
+3. `~/.cache/vsync` as the fallback
 
 ```
 ~/.config/vsync/
@@ -343,11 +356,12 @@ The vsync state directory is resolved in this order:
   tokens/
     vault_addr.enc                     ← encrypted Vault address
     vault_token.enc                    ← encrypted Vault token
-  cache/
-    env/<key>.enc                      ← cached env secrets with expiry
-    files/<key>.enc                    ← cached file secrets with expiry
   shims/
     <command>                          ← one tiny shell script per configured command
+
+<cache dir>/
+  env/<key>.enc                        ← cached env secrets with expiry
+  files/<key>.enc                      ← cached file secrets with expiry
 ```
 
 All `.enc` files are AES-256-GCM encrypted binary blobs (nonce + ciphertext). All files

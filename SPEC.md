@@ -27,12 +27,19 @@
 
 ## Directory Layout
 
-The vsync state directory is resolved in this order:
+vsync keeps its long-lived state and its secret cache in separate locations.
+
+The **state directory** is resolved in this order:
 1. `VSYNC_STATE_DIR` if set (full override)
 2. `XDG_STATE_DIR/vsync` if `XDG_STATE_DIR` is set
 3. `~/.local/state/vsync` as the fallback
 
-All paths below refer to that resolved state directory.
+The **cache directory** is resolved independently:
+1. `VSYNC_CACHE_DIR` if set (full override)
+2. `XDG_CACHE_DIR/vsync` if `XDG_CACHE_DIR` is set
+3. `~/.cache/vsync` as the fallback
+
+All paths below refer to those resolved directories.
 
 ```
 ~/.config/vsync/
@@ -43,12 +50,13 @@ All paths below refer to that resolved state directory.
     default.key                # 32-byte random AES-256 key (0600)
   tokens/
     vault_addr.enc             # AES-GCM encrypted VAULT_ADDR
-    vault_token.enc            # AES-GCM encrypted VAULT_TOKEN
-  cache/
-    env/<key-name>.enc         # encrypted cached env-secret + expiry metadata
-    files/<key-name>.enc       # encrypted cached file-secret + expiry metadata
+    vault_token.enc             # AES-GCM encrypted VAULT_TOKEN
   shims/
     <command-name>             # executable shim binary/script per configured command
+
+<cache dir>/
+  env/<key-name>.enc           # encrypted cached env-secret + expiry metadata
+  files/<key-name>.enc         # encrypted cached file-secret + expiry metadata
 ```
 
 ---
@@ -190,7 +198,7 @@ vsync exec <command> [args...]
 
 1. Load config; find the matching `env.commands` entry for `<command>`.
 2. For each `variable` in that entry:
-   a. Check encrypted cache (`<state dir>/cache/env/<key>.enc`); use cached value if not expired.
+   a. Check encrypted cache (`<cache dir>/env/<key>.enc`); use cached value if not expired.
    b. Otherwise decrypt Vault credentials, connect, fetch secret from `<env_prefix>/<key>`, cache result.
 3. Build env: copy `os.Environ()`, add/override fetched variables.
 4. Find the real binary: search `PATH` **skipping** `<state dir>/shims` to avoid re-entering the shim.
@@ -214,7 +222,7 @@ vsync sync [--file <key>]  # sync a specific file, or all if omitted
    b. Fetch secret from `<files_prefix>/<key>`; read `content` field.
    c. Expand `~` in `path`; create parent directories.
    d. Write content to `path` with configured `mode` (default `0600`).
-   e. Update encrypted cache entry with TTL from Vault lease.
+   e. Update encrypted cache entry under `<cache dir>/files/<key>.enc` with TTL from Vault lease.
 3. Print a summary of synced / skipped files.
 
 ---
@@ -293,7 +301,7 @@ All `.enc` files contain the raw binary blob (nonce + ciphertext). Files are wri
 
 ## Cache Format
 
-Each cache file at `<state dir>/cache/{env,files}/<key>.enc` stores an encrypted JSON blob:
+Each cache file at `<cache dir>/{env,files}/<key>.enc` stores an encrypted JSON blob:
 
 ```json
 {
