@@ -328,12 +328,24 @@ These flags work with every command.
 |------|---------------------|-------------|
 | `--vault-addr` | `VAULT_ADDR` | Vault server address |
 | `--vault-token` | `VAULT_TOKEN` | Vault token |
+| `--vault-env-prefix` | `VSYNC_VAULT_ENV_PREFIX` | Vault prefix for env secrets (`vault.env_prefix`) |
+| `--vault-files-prefix` | `VSYNC_VAULT_FILES_PREFIX` | Vault prefix for file secrets (`vault.files_prefix`) |
+| `--vault-kv-version` | `VSYNC_VAULT_KV_VERSION` | Vault KV version (`vault.kv_version`, 1 or 2) |
 | `--global-config` | `VSYNC_GLOBAL_CONFIG` | Global config file path |
 | `--config` | `VSYNC_CONFIG` | Local override config path |
 | `--key` | `VSYNC_KEY` | Encryption key file path (defaults to `<state dir>/keys/default.key`) |
 
 Flags take precedence over environment variables, which take precedence over the
-encrypted values stored by `vsync init`.
+values stored in `config.yaml`, and then over the encrypted values stored by `vsync init`.
+
+Example:
+
+```sh
+vsync shell \
+  --vault-env-prefix secret/data/team/env \
+  --vault-files-prefix secret/data/team/files \
+  --vault-kv-version 2
+```
 
 ---
 

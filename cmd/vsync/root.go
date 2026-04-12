@@ -3,8 +3,10 @@ package main
 import (
 	"fmt"
 	"os"
+	"strconv"
 
 	"github.com/spf13/cobra"
+	"github.com/vsync/vsync/internal/config"
 	"github.com/vsync/vsync/internal/crypto"
 	"github.com/vsync/vsync/internal/state"
 )
@@ -12,6 +14,9 @@ import (
 var (
 	flagVaultAddr        string
 	flagVaultToken       string
+	flagVaultEnvPrefix   string
+	flagVaultFilesPrefix string
+	flagVaultKVVersion   string
 	flagGlobalConfigPath string
 	flagConfigPath       string
 	flagKeyPath          string
@@ -58,6 +63,9 @@ loaded from a global config file and, optionally, a local override config.`,
 
 	root.PersistentFlags().StringVar(&flagVaultAddr, "vault-addr", "", "Vault server address (overrides VAULT_ADDR)")
 	root.PersistentFlags().StringVar(&flagVaultToken, "vault-token", "", "Vault token (overrides VAULT_TOKEN)")
+	root.PersistentFlags().StringVar(&flagVaultEnvPrefix, "vault-env-prefix", "", "Vault prefix for env secrets (overrides VSYNC_VAULT_ENV_PREFIX and config.yaml vault.env_prefix)")
+	root.PersistentFlags().StringVar(&flagVaultFilesPrefix, "vault-files-prefix", "", "Vault prefix for file secrets (overrides VSYNC_VAULT_FILES_PREFIX and config.yaml vault.files_prefix)")
+	root.PersistentFlags().StringVar(&flagVaultKVVersion, "vault-kv-version", "", "Vault KV version, 1 or 2 (overrides VSYNC_VAULT_KV_VERSION and config.yaml vault.kv_version)")
 	root.PersistentFlags().StringVar(&flagGlobalConfigPath, "global-config", "", "Global config file path (default: $XDG_CONFIG_HOME/vsync/config.yaml or ~/.config/vsync/config.yaml; overrides VSYNC_GLOBAL_CONFIG)")
 	root.PersistentFlags().StringVar(&flagConfigPath, "config", "", "Local override config file path (default: search for vsync.yaml in cwd/parents; overrides VSYNC_CONFIG)")
 	root.PersistentFlags().StringVar(&flagKeyPath, "key", "", "Encryption key file path (default: ~/.local/state/vsync/keys/default.key)")
@@ -132,6 +140,67 @@ func resolveVaultToken() string {
 		return flagVaultToken
 	}
 	return os.Getenv("VAULT_TOKEN")
+}
+
+func resolveVaultEnvPrefix() string {
+	if flagVaultEnvPrefix != "" {
+		return flagVaultEnvPrefix
+	}
+	return os.Getenv("VSYNC_VAULT_ENV_PREFIX")
+}
+
+func resolveVaultFilesPrefix() string {
+	if flagVaultFilesPrefix != "" {
+		return flagVaultFilesPrefix
+	}
+	return os.Getenv("VSYNC_VAULT_FILES_PREFIX")
+}
+
+func resolveVaultKVVersion() (int, error) {
+	raw := flagVaultKVVersion
+	if raw == "" {
+		raw = os.Getenv("VSYNC_VAULT_KV_VERSION")
+	}
+	if raw == "" {
+		return 0, nil
+	}
+	version, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, fmt.Errorf("parse VSYNC_VAULT_KV_VERSION %q: %w", raw, err)
+	}
+	if version != 1 && version != 2 {
+		return 0, fmt.Errorf("invalid vault kv version %d: must be 1 or 2", version)
+	}
+	return version, nil
+}
+
+func applyVaultOverrides(cfg *config.Config) error {
+	if cfg == nil {
+		return nil
+	}
+	if v := resolveVaultEnvPrefix(); v != "" {
+		cfg.Vault.EnvPrefix = v
+	}
+	if v := resolveVaultFilesPrefix(); v != "" {
+		cfg.Vault.FilesPrefix = v
+	}
+	if v, err := resolveVaultKVVersion(); err != nil {
+		return err
+	} else if v != 0 {
+		cfg.Vault.KVVersion = v
+	}
+	return nil
+}
+
+func loadConfigWithOverrides(globalPath, overridePath string) (*config.Config, error) {
+	cfg, err := config.LoadOrEmpty(globalPath, overridePath)
+	if err != nil {
+		return nil, err
+	}
+	if err := applyVaultOverrides(cfg); err != nil {
+		return nil, err
+	}
+	return cfg, nil
 }
 
 func die(format string, a ...any) {

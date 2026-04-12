@@ -13,7 +13,7 @@ import (
 
 var (
 	shellLaunchFn    = shell.Launch
-	loadConfigFn     = config.LoadOrEmpty
+	loadConfigFn     = loadConfigWithOverrides
 	expandPathsFn    = func(cfg *config.Config) error { return cfg.ExpandPaths() }
 	ensureShimsFn    = shim.Ensure
 	loadCredsFn      = vlt.LoadCredentials

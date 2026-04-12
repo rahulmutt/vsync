@@ -53,6 +53,9 @@ func setupShellTest(t *testing.T) (*state.Dirs, []byte, string) {
 		flagConfigPath = ""
 		flagVaultAddr = ""
 		flagVaultToken = ""
+		flagVaultEnvPrefix = ""
+		flagVaultFilesPrefix = ""
+		flagVaultKVVersion = ""
 		flagKeyPath = ""
 		shellLaunchFn = shellpkg.Launch
 	})

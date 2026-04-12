@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/vsync/vsync/internal/config"
 	"github.com/vsync/vsync/internal/crypto"
 	"github.com/vsync/vsync/internal/state"
 )
@@ -22,12 +23,18 @@ func TestResolveHelpers(t *testing.T) {
 
 	flagVaultAddr = ""
 	flagVaultToken = ""
+	flagVaultEnvPrefix = ""
+	flagVaultFilesPrefix = ""
+	flagVaultKVVersion = ""
 	flagGlobalConfigPath = ""
 	flagConfigPath = ""
 	flagKeyPath = ""
 	defer func() {
 		flagVaultAddr = ""
 		flagVaultToken = ""
+		flagVaultEnvPrefix = ""
+		flagVaultFilesPrefix = ""
+		flagVaultKVVersion = ""
 		flagGlobalConfigPath = ""
 		flagConfigPath = ""
 		flagKeyPath = ""
@@ -197,6 +204,63 @@ func TestResolveConfigPathsUsesFlagEnvAndDefaults(t *testing.T) {
 	}
 }
 
+func TestResolveVaultOverrides(t *testing.T) {
+	flagVaultEnvPrefix = "flag/env"
+	flagVaultFilesPrefix = "flag/files"
+	flagVaultKVVersion = "1"
+	defer func() {
+		flagVaultEnvPrefix = ""
+		flagVaultFilesPrefix = ""
+		flagVaultKVVersion = ""
+	}()
+	t.Setenv("VSYNC_VAULT_ENV_PREFIX", "env/env")
+	t.Setenv("VSYNC_VAULT_FILES_PREFIX", "env/files")
+	t.Setenv("VSYNC_VAULT_KV_VERSION", "2")
+
+	cfg := &config.Config{}
+	if err := applyVaultOverrides(cfg); err != nil {
+		t.Fatalf("applyVaultOverrides() error = %v", err)
+	}
+	if got, want := cfg.Vault.EnvPrefix, "flag/env"; got != want {
+		t.Fatalf("EnvPrefix = %q, want %q", got, want)
+	}
+	if got, want := cfg.Vault.FilesPrefix, "flag/files"; got != want {
+		t.Fatalf("FilesPrefix = %q, want %q", got, want)
+	}
+	if got, want := cfg.Vault.KVVersion, 1; got != want {
+		t.Fatalf("KVVersion = %d, want %d", got, want)
+	}
+
+	flagVaultEnvPrefix = ""
+	flagVaultFilesPrefix = ""
+	flagVaultKVVersion = ""
+	cfg = &config.Config{}
+	if err := applyVaultOverrides(cfg); err != nil {
+		t.Fatalf("applyVaultOverrides() env error = %v", err)
+	}
+	if got, want := cfg.Vault.EnvPrefix, "env/env"; got != want {
+		t.Fatalf("EnvPrefix(env) = %q, want %q", got, want)
+	}
+	if got, want := cfg.Vault.FilesPrefix, "env/files"; got != want {
+		t.Fatalf("FilesPrefix(env) = %q, want %q", got, want)
+	}
+	if got, want := cfg.Vault.KVVersion, 2; got != want {
+		t.Fatalf("KVVersion(env) = %d, want %d", got, want)
+	}
+}
+
+func TestResolveVaultKVVersionRejectsInvalidValues(t *testing.T) {
+	flagVaultKVVersion = "not-a-number"
+	defer func() { flagVaultKVVersion = "" }()
+	if _, err := resolveVaultKVVersion(); err == nil {
+		t.Fatal("resolveVaultKVVersion() error = nil, want parse error")
+	}
+	flagVaultKVVersion = "3"
+	if _, err := resolveVaultKVVersion(); err == nil {
+		t.Fatal("resolveVaultKVVersion() error = nil, want invalid version error")
+	}
+}
+
 func TestRootCmdRegistersCommandsAndFlags(t *testing.T) {
 	root := rootCmd()
 	if root.Use != "vsync" {
@@ -214,7 +278,7 @@ func TestRootCmdRegistersCommandsAndFlags(t *testing.T) {
 			t.Fatalf("root command missing %q", want)
 		}
 	}
-	for _, want := range []string{"vault-addr", "vault-token", "global-config", "config", "key"} {
+	for _, want := range []string{"vault-addr", "vault-token", "vault-env-prefix", "vault-files-prefix", "vault-kv-version", "global-config", "config", "key"} {
 		if root.PersistentFlags().Lookup(want) == nil {
 			t.Fatalf("missing flag %q", want)
 		}
@@ -236,10 +300,16 @@ func TestPersistentPreRunSetsGlobalsForNonInit(t *testing.T) {
 		t.Fatal(err)
 	}
 	flagKeyPath = ""
+	flagVaultEnvPrefix = ""
+	flagVaultFilesPrefix = ""
+	flagVaultKVVersion = ""
 	globalDirs = nil
 	globalKey = nil
 	defer func() {
 		flagKeyPath = ""
+		flagVaultEnvPrefix = ""
+		flagVaultFilesPrefix = ""
+		flagVaultKVVersion = ""
 		globalDirs = nil
 		globalKey = nil
 	}()

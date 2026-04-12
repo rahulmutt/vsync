@@ -52,6 +52,9 @@ func setupStatusTest(t *testing.T) (*state.Dirs, []byte, string) {
 		flagConfigPath = ""
 		flagVaultAddr = ""
 		flagVaultToken = ""
+		flagVaultEnvPrefix = ""
+		flagVaultFilesPrefix = ""
+		flagVaultKVVersion = ""
 		flagKeyPath = ""
 	})
 	return dirs, key, cfgPath

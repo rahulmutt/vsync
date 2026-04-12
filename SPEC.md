@@ -140,11 +140,14 @@ vsync [command] [flags]
 |------|---------|-------------|
 | `--vault-addr` | `VAULT_ADDR` | Vault server address |
 | `--vault-token` | `VAULT_TOKEN` | Vault token |
+| `--vault-env-prefix` | `VSYNC_VAULT_ENV_PREFIX` | Vault prefix for env secrets (`vault.env_prefix`) |
+| `--vault-files-prefix` | `VSYNC_VAULT_FILES_PREFIX` | Vault prefix for file secrets (`vault.files_prefix`) |
+| `--vault-kv-version` | `VSYNC_VAULT_KV_VERSION` | Vault KV version (`vault.kv_version`, 1 or 2) |
 | `--global-config` | `VSYNC_GLOBAL_CONFIG` | Path to the global config file (default: `$XDG_CONFIG_HOME/vsync/config.yaml` or `~/.config/vsync/config.yaml`) |
 | `--config` | `VSYNC_CONFIG` | Path to the local override config file (default: searched `vsync.yaml` in cwd/parents) |
 | `--key` | `VSYNC_KEY` | Path to encryption key file (default: `<state dir>/keys/default.key`) |
 
-Flags take precedence over environment variables; environment variables take precedence over stored/encrypted values.
+Flags take precedence over environment variables; environment variables take precedence over `config.yaml` values, and those take precedence over stored/encrypted values.
 
 ---
 

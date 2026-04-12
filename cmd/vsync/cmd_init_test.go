@@ -38,6 +38,9 @@ func setupInitTest(t *testing.T) (*state.Dirs, string) {
 		flagConfigPath = ""
 		flagVaultAddr = ""
 		flagVaultToken = ""
+		flagVaultEnvPrefix = ""
+		flagVaultFilesPrefix = ""
+		flagVaultKVVersion = ""
 		flagKeyPath = ""
 		defaultDirsFn = state.DefaultDirs
 		generateKeyFn = crypto.GenerateKey
