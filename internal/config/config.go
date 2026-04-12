@@ -12,13 +12,21 @@ import (
 var userHomeDirFn = os.UserHomeDir
 var workingDirFn = os.Getwd
 
-// DefaultConfigPath returns the default config file path.
-func DefaultConfigPath() (string, error) {
+// DefaultGlobalConfigPath returns the default global config file path.
+func DefaultGlobalConfigPath() (string, error) {
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		return filepath.Join(xdg, "vsync", "config.yaml"), nil
+	}
 	home, err := userHomeDirFn()
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(home, ".config", "vsync", "config.yaml"), nil
+}
+
+// DefaultConfigPath is kept for backwards compatibility.
+func DefaultConfigPath() (string, error) {
+	return DefaultGlobalConfigPath()
 }
 
 // Config is the top-level vsync configuration.
@@ -87,11 +95,11 @@ func Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
-// LoadOrEmpty loads the base config file plus any vsync.yaml files from the
-// current directory and its parents, merging them from top to bottom.
-// Missing files are ignored.
-func LoadOrEmpty(path string) (*Config, error) {
-	paths, err := configPaths(path)
+// LoadOrEmpty loads the global config file plus any local override config,
+// merging them from top to bottom. If overridePath is empty, it searches for
+// vsync.yaml in the current directory and its parents. Missing files are ignored.
+func LoadOrEmpty(globalPath, overridePath string) (*Config, error) {
+	paths, err := configPaths(globalPath, overridePath)
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +149,7 @@ func loadFile(path string) (*Config, error) {
 	return &cfg, nil
 }
 
-func configPaths(basePath string) ([]string, error) {
+func configPaths(globalPath, overridePath string) ([]string, error) {
 	paths := []string{}
 	seen := map[string]struct{}{}
 	add := func(path string) error {
@@ -163,10 +171,22 @@ func configPaths(basePath string) ([]string, error) {
 		return nil
 	}
 
-	if basePath != "" {
-		if err := add(basePath); err != nil {
+	if globalPath == "" {
+		var err error
+		globalPath, err = DefaultGlobalConfigPath()
+		if err != nil {
 			return nil, err
 		}
+	}
+	if err := add(globalPath); err != nil {
+		return nil, err
+	}
+
+	if overridePath != "" {
+		if err := add(overridePath); err != nil {
+			return nil, err
+		}
+		return paths, nil
 	}
 
 	cwd, err := workingDirFn()

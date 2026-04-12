@@ -57,9 +57,15 @@ func statusCmd() *cobra.Command {
 			}
 
 			// Config.
-			cfgPath, _ := resolveConfigPath()
-			printField("Config file", cfgPath)
-			cfg, cfgErr := loadConfigFn(cfgPath)
+			globalCfgPath, _ := resolveGlobalConfigPath()
+			overrideCfgPath, _ := resolveConfigPath()
+			printField("Global config", globalCfgPath)
+			if overrideCfgPath == "" {
+				printField("Override config", "search vsync.yaml in cwd/parents")
+			} else {
+				printField("Override config", overrideCfgPath)
+			}
+			cfg, cfgErr := loadConfigFn(globalCfgPath, overrideCfgPath)
 			if cfgErr != nil {
 				fmt.Printf("  %-20s %v\n", "Config error:", cfgErr)
 			} else {

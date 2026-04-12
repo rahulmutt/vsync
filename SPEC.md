@@ -63,11 +63,12 @@ All paths below refer to those resolved directories.
 
 ## Configuration File
 
-**Path:** `~/.config/vsync/config.yaml`
+**Global path:** `$XDG_CONFIG_HOME/vsync/config.yaml` (or `~/.config/vsync/config.yaml` if `XDG_CONFIG_HOME` is unset).
 
-`vsync` also searches for `vsync.yaml` in the current directory and each parent
-directory. Those files are merged on top of the base config from root-most to
-leaf-most, so the closest `vsync.yaml` wins for overlapping settings. Merge identity
+`--config` / `VSYNC_CONFIG` point to a local override config. If they are not set,
+`vsync` searches for `vsync.yaml` in the current directory and each parent
+directory. Any override is merged on top of the global config from root-most to
+leaf-most, so the closest local config wins for overlapping settings. Merge identity
 is:
 - commands: `env.commands[*].name`
 - command variables: `env.commands[*].variables[*].name`
@@ -139,7 +140,8 @@ vsync [command] [flags]
 |------|---------|-------------|
 | `--vault-addr` | `VAULT_ADDR` | Vault server address |
 | `--vault-token` | `VAULT_TOKEN` | Vault token |
-| `--config` | `VSYNC_CONFIG` | Path to config file (default: `~/.config/vsync/config.yaml`) |
+| `--global-config` | `VSYNC_GLOBAL_CONFIG` | Path to the global config file (default: `$XDG_CONFIG_HOME/vsync/config.yaml` or `~/.config/vsync/config.yaml`) |
+| `--config` | `VSYNC_CONFIG` | Path to the local override config file (default: searched `vsync.yaml` in cwd/parents) |
 | `--key` | `VSYNC_KEY` | Path to encryption key file (default: `<state dir>/keys/default.key`) |
 
 Flags take precedence over environment variables; environment variables take precedence over stored/encrypted values.
@@ -179,7 +181,7 @@ vsync shell [--shell /bin/zsh]
 **Steps:**
 
 1. Load and decrypt Vault credentials (or use flag/env overrides).
-2. Read the base config file plus any `vsync.yaml` files in the current directory and parent directories, then merge them.
+2. Read the global config file and any local override config (explicit `--config`/`VSYNC_CONFIG`, or searched `vsync.yaml` files in the current directory and parent directories), then merge them.
 3. Sync all `files` entries (see **File Sync** below).
 4. Build shims (see **Shim Mechanism** below) in `<state dir>/shims/`.
 5. Construct child environment:
@@ -374,7 +376,7 @@ vsync/
       main.go                  # entry point; registers cobra commands
   internal/
     config/
-      config.go                # load & merge config files (base config + vsync.yaml overlays)
+      config.go                # load & merge config files (global config + optional local override)
     crypto/
       crypto.go                # key generation, AES-GCM encrypt/decrypt
     vault/

@@ -30,11 +30,15 @@ func execCmd() *cobra.Command {
 			dirs := globalDirs
 			key := globalKey
 
-			cfgPath, err := resolveConfigPath()
+			globalCfgPath, err := resolveGlobalConfigPath()
 			if err != nil {
 				return err
 			}
-			cfg, err := loadConfigFn(cfgPath)
+			overrideCfgPath, err := resolveConfigPath()
+			if err != nil {
+				return err
+			}
+			cfg, err := loadConfigFn(globalCfgPath, overrideCfgPath)
 			if err != nil {
 				return err
 			}

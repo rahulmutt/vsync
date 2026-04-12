@@ -34,6 +34,7 @@ func setupInitTest(t *testing.T) (*state.Dirs, string) {
 	globalDirs = dirs
 	t.Cleanup(func() {
 		globalDirs = nil
+		flagGlobalConfigPath = ""
 		flagConfigPath = ""
 		flagVaultAddr = ""
 		flagVaultToken = ""

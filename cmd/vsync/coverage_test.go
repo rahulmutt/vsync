@@ -219,7 +219,7 @@ func TestShellCmdBranches(t *testing.T) {
 	}()
 
 	t.Run("load config", func(t *testing.T) {
-		loadConfigFn = func(string) (*config.Config, error) { return nil, errors.New("cfg") }
+		loadConfigFn = func(string, string) (*config.Config, error) { return nil, errors.New("cfg") }
 		cmd := shellCmd()
 		cmd.SilenceErrors = true
 		cmd.SilenceUsage = true
@@ -331,7 +331,7 @@ func TestExecCmdBranches(t *testing.T) {
 	}()
 
 	t.Run("config and creds", func(t *testing.T) {
-		loadConfigFn = func(string) (*config.Config, error) { return nil, errors.New("cfg") }
+		loadConfigFn = func(string, string) (*config.Config, error) { return nil, errors.New("cfg") }
 		cmd := execCmd()
 		cmd.SilenceErrors = true
 		cmd.SilenceUsage = true
@@ -407,7 +407,7 @@ func TestSyncCmdBranchesAndHelpers(t *testing.T) {
 	}()
 
 	t.Run("config and expand", func(t *testing.T) {
-		loadConfigFn = func(string) (*config.Config, error) { return nil, errors.New("cfg") }
+		loadConfigFn = func(string, string) (*config.Config, error) { return nil, errors.New("cfg") }
 		cmd := syncCmd()
 		cmd.SilenceErrors = true
 		cmd.SilenceUsage = true
@@ -516,7 +516,7 @@ func TestStatusCmdBranches(t *testing.T) {
 	}()
 
 	t.Run("config error", func(t *testing.T) {
-		loadConfigFn = func(string) (*config.Config, error) { return nil, errors.New("cfg") }
+		loadConfigFn = func(string, string) (*config.Config, error) { return nil, errors.New("cfg") }
 		cmd := statusCmd()
 		cmd.SilenceErrors = true
 		cmd.SilenceUsage = true
@@ -550,7 +550,7 @@ func TestStatusCmdBranches(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		loadConfigFn = func(string) (*config.Config, error) {
+		loadConfigFn = func(string, string) (*config.Config, error) {
 			cfg := &config.Config{}
 			cfg.Env.Commands = []config.CommandEntry{{Name: "pi", Variables: []config.VariableEntry{{Name: "GEMINI_API_KEY", Key: "gemini-api-key"}, {Name: "NO_EXPIRY", Key: "no-expiry"}}}}
 			cfg.Files = []config.FileEntry{{Path: filepath.Join(home, "missing.txt"), Key: "sync"}}
@@ -954,7 +954,7 @@ func TestExecCmdDirectBranch(t *testing.T) {
 		loadConfigFn = origLoadCfg
 		execRealCommand = origExec
 	}()
-	loadConfigFn = func(string) (*config.Config, error) { return &config.Config{}, nil }
+	loadConfigFn = func(string, string) (*config.Config, error) { return &config.Config{}, nil }
 	called := false
 	execRealCommand = func(name string, args []string, extraEnv map[string]string, shimDir string) error {
 		called = true

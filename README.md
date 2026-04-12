@@ -64,10 +64,10 @@ vsync --help
 ### 1. Write a config file
 
 ```sh
-mkdir -p ~/.config/vsync
+mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/vsync"
 ```
 
-`~/.config/vsync/config.yaml`:
+`${XDG_CONFIG_HOME:-$HOME/.config}/vsync/config.yaml`:
 
 ```yaml
 env:
@@ -139,14 +139,10 @@ That's it. From this shell, every configured command automatically gets its secr
 
 ## Configuration reference
 
-**Location:** `~/.config/vsync/config.yaml`  
-Override with `--config <path>` or `VSYNC_CONFIG=<path>`.
+**Global location:** `$XDG_CONFIG_HOME/vsync/config.yaml` (or `~/.config/vsync/config.yaml` if `XDG_CONFIG_HOME` is unset).  
+Override with `--global-config <path>` or `VSYNC_GLOBAL_CONFIG=<path>`.
 
-In addition to the base config, `vsync` also looks for `vsync.yaml` in the current
-directory and every parent directory. Those files are merged on top of the base config
-from top to bottom, so the closest `vsync.yaml` wins for overlapping settings.
-Entries are merged by identity: commands by `name`, command variables by variable
-`name`, and file sync entries by `key`.
+`--config <path>` or `VSYNC_CONFIG=<path>` point to a local override config. If not set, `vsync` searches for `vsync.yaml` in the current directory and every parent directory. Any override is merged on top of the global config from top to bottom, so the closest local config wins for overlapping settings. Entries are merged by identity: commands by `name`, command variables by variable `name`, and file sync entries by `key`.
 
 ```yaml
 # Optional vault settings (these are the defaults)
@@ -230,7 +226,7 @@ vsync shell [--shell /bin/zsh]
 
 What happens when you run it:
 
-1. `vsync` loads the base config file plus any `vsync.yaml` files in the current directory and parent directories, then merges them.
+1. `vsync` loads the global config file and then merges any local override config (`--config`, `VSYNC_CONFIG`, or searched `vsync.yaml` files in the current directory and parent directories).
 2. Configured files are synced from Vault to their local paths.
 3. Shim scripts are written (or refreshed) for every configured command.
 4. A new shell is started with:
@@ -281,7 +277,8 @@ Example output:
   Cache dir:           ~/.cache/vsync
   Vault address:       https://vault.example.com
   Token TTL:           11h59m42s
-  Config file:         ~/.config/vsync/config.yaml
+  Global config:       $XDG_CONFIG_HOME/vsync/config.yaml
+  Override config:     search vsync.yaml in cwd/parents
 
 Configured commands (2):
   pi                    (shim present)
@@ -331,7 +328,8 @@ These flags work with every command.
 |------|---------------------|-------------|
 | `--vault-addr` | `VAULT_ADDR` | Vault server address |
 | `--vault-token` | `VAULT_TOKEN` | Vault token |
-| `--config` | `VSYNC_CONFIG` | Config file path |
+| `--global-config` | `VSYNC_GLOBAL_CONFIG` | Global config file path |
+| `--config` | `VSYNC_CONFIG` | Local override config path |
 | `--key` | `VSYNC_KEY` | Encryption key file path (defaults to `<state dir>/keys/default.key`) |
 
 Flags take precedence over environment variables, which take precedence over the
@@ -354,8 +352,8 @@ The **cache directory** is resolved independently:
 3. `~/.cache/vsync` as the fallback
 
 ```
-~/.config/vsync/
-  config.yaml                          ← your configuration
+${XDG_CONFIG_HOME:-$HOME/.config}/vsync/
+  config.yaml                          ← global configuration
 
 <state dir>/
   keys/

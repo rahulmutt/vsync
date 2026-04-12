@@ -93,6 +93,7 @@ func TestSyncCmdAgainstDevenvVault(t *testing.T) {
 	globalDirs = dirs
 	globalKey = key
 	defer func() {
+		flagGlobalConfigPath = ""
 		flagConfigPath = ""
 		globalDirs = nil
 		globalKey = nil

@@ -48,6 +48,7 @@ func setupStatusTest(t *testing.T) (*state.Dirs, []byte, string) {
 	t.Cleanup(func() {
 		globalDirs = nil
 		globalKey = nil
+		flagGlobalConfigPath = ""
 		flagConfigPath = ""
 		flagVaultAddr = ""
 		flagVaultToken = ""
@@ -131,6 +132,8 @@ func TestStatusCmdReportsConfiguredState(t *testing.T) {
 		"=== vsync status ===",
 		"Vault address:",
 		"Cache dir:",
+		"Global config:",
+		"Override config:",
 		"Token TTL:",
 		"Configured commands (1):",
 		"pi",

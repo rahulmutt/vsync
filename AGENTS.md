@@ -57,7 +57,7 @@ vsync/
 │   ├── cmd_status.go       # vsync status
 │   └── cmd_cache.go        # vsync cache clear
 ├── internal/
-│   ├── config/config.go    # load & validate ~/.config/vsync/config.yaml
+│   ├── config/config.go    # load & validate $XDG_CONFIG_HOME/vsync/config.yaml (fallback ~/.config/vsync/config.yaml)
 │   ├── crypto/             # AES-256-GCM key gen, encrypt, decrypt; unit-tested
 │   ├── shell/shell.go      # build augmented env, syscall.Exec into shell or command
 │   ├── shim/shim.go        # write/remove #!/bin/sh shim scripts
@@ -127,7 +127,7 @@ plain, _ := crypto.DecryptFile(key, path)
 
 ### `internal/config`
 
-Loads and validates `~/.config/vsync/config.yaml`. Returns a `*config.Config` struct.
+Loads and validates the global config file at `$XDG_CONFIG_HOME/vsync/config.yaml` (fallback `~/.config/vsync/config.yaml`). Returns a `*config.Config` struct.
 
 Important defaults (applied inside `Load()` if the YAML omits them):
 - `vault.env_prefix` → `"secret/data/vsync/env"`
@@ -329,7 +329,7 @@ Implementation notes for agents modifying `devenv.nix`:
 
 ```
 vsync shell
-  └─ load config (~/.config/vsync/config.yaml)
+  └─ load config ($XDG_CONFIG_HOME/vsync/config.yaml, fallback ~/.config/vsync/config.yaml)
   └─ decrypt vault creds (tokens/*.enc) with key (keys/default.key)
   └─ sync files from Vault → local paths (<cache dir>/files/*.enc)
   └─ write shims (shims/<cmd>) → #!/bin/sh exec vsync exec <cmd> "$@"
@@ -366,7 +366,8 @@ pi ...
 |----------|--------|---------|
 | `VAULT_ADDR` | User / CI | `cmd_init`, `root.go` resolver |
 | `VAULT_TOKEN` | User / CI | `cmd_init`, `root.go` resolver |
-| `VSYNC_CONFIG` | User | `root.go` (config path override) |
+| `VSYNC_GLOBAL_CONFIG` | User | `root.go` (global config override) |
+| `VSYNC_CONFIG` | User | `root.go` (local override config path) |
 | `VSYNC_STATE_DIR` | User / CI | `internal/state.DefaultDirs` full override for the vsync state directory |
 | `XDG_STATE_HOME` | User / CI | `internal/state.DefaultDirs` parent for the vsync state directory (`$XDG_STATE_HOME/vsync`) |
 | `VSYNC_CACHE_DIR` | User / CI | `internal/state.DefaultDirs` full override for the cache directory |

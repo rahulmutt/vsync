@@ -64,7 +64,7 @@ func TestLoadOrEmptyMissingAndExistingFile(t *testing.T) {
 	defer func() { _ = os.Chdir(oldWD) }()
 
 	missing := filepath.Join(t.TempDir(), "missing.yaml")
-	cfg, err := LoadOrEmpty(missing)
+	cfg, err := LoadOrEmpty(missing, "")
 	if err != nil {
 		t.Fatalf("LoadOrEmpty() missing error = %v", err)
 	}
@@ -82,7 +82,7 @@ func TestLoadOrEmptyMissingAndExistingFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte("files:\n  - path: ~/x\n    key: y\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err = LoadOrEmpty(path)
+	cfg, err = LoadOrEmpty(missing, path)
 	if err != nil {
 		t.Fatalf("LoadOrEmpty() existing error = %v", err)
 	}
@@ -163,7 +163,7 @@ files:
 	}
 	defer func() { _ = os.Chdir(oldWD) }()
 
-	cfg, err := LoadOrEmpty(basePath)
+	cfg, err := LoadOrEmpty(basePath, "")
 	if err != nil {
 		t.Fatalf("LoadOrEmpty() merge error = %v", err)
 	}
@@ -220,14 +220,25 @@ func TestLoadReportsMissingFile(t *testing.T) {
 	}
 }
 
-func TestDefaultConfigPathUsesHome(t *testing.T) {
+func TestDefaultConfigPathUsesXDGAndHomeFallback(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	got, err := DefaultConfigPath()
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "xdg-config"))
+	got, err := DefaultGlobalConfigPath()
+	if err != nil {
+		t.Fatalf("DefaultGlobalConfigPath() error = %v", err)
+	}
+	want := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "vsync", "config.yaml")
+	if got != want {
+		t.Fatalf("DefaultGlobalConfigPath() = %q, want %q", got, want)
+	}
+
+	t.Setenv("XDG_CONFIG_HOME", "")
+	got, err = DefaultConfigPath()
 	if err != nil {
 		t.Fatalf("DefaultConfigPath() error = %v", err)
 	}
-	want := filepath.Join(home, ".config", "vsync", "config.yaml")
+	want = filepath.Join(home, ".config", "vsync", "config.yaml")
 	if got != want {
 		t.Fatalf("DefaultConfigPath() = %q, want %q", got, want)
 	}

@@ -10,10 +10,11 @@ import (
 )
 
 var (
-	flagVaultAddr  string
-	flagVaultToken string
-	flagConfigPath string
-	flagKeyPath    string
+	flagVaultAddr        string
+	flagVaultToken       string
+	flagGlobalConfigPath string
+	flagConfigPath       string
+	flagKeyPath          string
 )
 
 var userHomeDirFn = os.UserHomeDir
@@ -34,8 +35,7 @@ where configured commands are shimmed to automatically inject secrets from Vault
 
 State lives under VSYNC_STATE_DIR / XDG_STATE_HOME / ~/.local/state/vsync, while the
 secret cache lives under VSYNC_CACHE_DIR / XDG_CACHE_HOME / ~/.cache/vsync. Config is
-loaded from the base config file and layered with any vsync.yaml files found in the
-current directory and its parents.`,
+loaded from a global config file and, optionally, a local override config.`,
 		SilenceUsage: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			// Skip for init subcommand (bootstraps dirs itself).
@@ -58,7 +58,8 @@ current directory and its parents.`,
 
 	root.PersistentFlags().StringVar(&flagVaultAddr, "vault-addr", "", "Vault server address (overrides VAULT_ADDR)")
 	root.PersistentFlags().StringVar(&flagVaultToken, "vault-token", "", "Vault token (overrides VAULT_TOKEN)")
-	root.PersistentFlags().StringVar(&flagConfigPath, "config", "", "Base config file path (default: ~/.config/vsync/config.yaml, layered with vsync.yaml in cwd/parents)")
+	root.PersistentFlags().StringVar(&flagGlobalConfigPath, "global-config", "", "Global config file path (default: $XDG_CONFIG_HOME/vsync/config.yaml or ~/.config/vsync/config.yaml; overrides VSYNC_GLOBAL_CONFIG)")
+	root.PersistentFlags().StringVar(&flagConfigPath, "config", "", "Local override config file path (default: search for vsync.yaml in cwd/parents; overrides VSYNC_CONFIG)")
 	root.PersistentFlags().StringVar(&flagKeyPath, "key", "", "Encryption key file path (default: ~/.local/state/vsync/keys/default.key)")
 
 	root.AddCommand(
@@ -88,6 +89,27 @@ func resolveKey(dirs *state.Dirs) ([]byte, error) {
 	return crypto.LoadKey(keyPath)
 }
 
+func resolveGlobalConfigPath() (string, error) {
+	if flagGlobalConfigPath != "" {
+		return flagGlobalConfigPath, nil
+	}
+	if v := os.Getenv("VSYNC_GLOBAL_CONFIG"); v != "" {
+		return v, nil
+	}
+	return defaultGlobalConfigPath()
+}
+
+func defaultGlobalConfigPath() (string, error) {
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		return xdg + "/vsync/config.yaml", nil
+	}
+	home, err := userHomeDirFn()
+	if err != nil {
+		return "", err
+	}
+	return home + "/.config/vsync/config.yaml", nil
+}
+
 func resolveConfigPath() (string, error) {
 	if flagConfigPath != "" {
 		return flagConfigPath, nil
@@ -95,15 +117,7 @@ func resolveConfigPath() (string, error) {
 	if v := os.Getenv("VSYNC_CONFIG"); v != "" {
 		return v, nil
 	}
-	return defaultConfigPath()
-}
-
-func defaultConfigPath() (string, error) {
-	home, err := userHomeDirFn()
-	if err != nil {
-		return "", err
-	}
-	return home + "/.config/vsync/config.yaml", nil
+	return "", nil
 }
 
 func resolveVaultAddr() string {

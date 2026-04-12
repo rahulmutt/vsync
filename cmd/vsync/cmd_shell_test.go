@@ -49,6 +49,7 @@ func setupShellTest(t *testing.T) (*state.Dirs, []byte, string) {
 	t.Cleanup(func() {
 		globalDirs = nil
 		globalKey = nil
+		flagGlobalConfigPath = ""
 		flagConfigPath = ""
 		flagVaultAddr = ""
 		flagVaultToken = ""

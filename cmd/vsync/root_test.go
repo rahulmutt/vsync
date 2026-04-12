@@ -18,14 +18,17 @@ func TestResolveHelpers(t *testing.T) {
 	t.Setenv("VAULT_ADDR", "http://env-addr")
 	t.Setenv("VAULT_TOKEN", "env-token")
 	t.Setenv("VSYNC_CONFIG", "/tmp/config.yaml")
+	t.Setenv("VSYNC_GLOBAL_CONFIG", "/tmp/global-config.yaml")
 
 	flagVaultAddr = ""
 	flagVaultToken = ""
+	flagGlobalConfigPath = ""
 	flagConfigPath = ""
 	flagKeyPath = ""
 	defer func() {
 		flagVaultAddr = ""
 		flagVaultToken = ""
+		flagGlobalConfigPath = ""
 		flagConfigPath = ""
 		flagKeyPath = ""
 	}()
@@ -38,6 +41,9 @@ func TestResolveHelpers(t *testing.T) {
 	}
 	if got, err := resolveConfigPath(); err != nil || got != "/tmp/config.yaml" {
 		t.Fatalf("resolveConfigPath() = (%q, %v)", got, err)
+	}
+	if got, err := resolveGlobalConfigPath(); err != nil || got != "/tmp/global-config.yaml" {
+		t.Fatalf("resolveGlobalConfigPath() = (%q, %v)", got, err)
 	}
 }
 
@@ -148,27 +154,46 @@ func TestResolveKeyUsesEnvAndDefault(t *testing.T) {
 	}
 }
 
-func TestResolveConfigPathUsesFlagEnvAndDefault(t *testing.T) {
+func TestResolveConfigPathsUsesFlagEnvAndDefaults(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	flagConfigPath = filepath.Join(home, "flag.yaml")
+	flagGlobalConfigPath = filepath.Join(home, "global-flag.yaml")
+	defer func() { flagGlobalConfigPath = "" }()
+	if got, err := resolveGlobalConfigPath(); err != nil || got != flagGlobalConfigPath {
+		t.Fatalf("resolveGlobalConfigPath() with flag = (%q, %v), want flag path", got, err)
+	}
+	flagGlobalConfigPath = ""
+	t.Setenv("VSYNC_GLOBAL_CONFIG", filepath.Join(home, "global-env.yaml"))
+	if got, err := resolveGlobalConfigPath(); err != nil || got != filepath.Join(home, "global-env.yaml") {
+		t.Fatalf("resolveGlobalConfigPath() with env = (%q, %v), want env path", got, err)
+	}
+	t.Setenv("VSYNC_GLOBAL_CONFIG", "")
+	got, err := resolveGlobalConfigPath()
+	if err != nil {
+		t.Fatalf("resolveGlobalConfigPath() default error = %v", err)
+	}
+	want := filepath.Join(home, ".config", "vsync", "config.yaml")
+	if got != want {
+		t.Fatalf("resolveGlobalConfigPath() default = %q, want %q", got, want)
+	}
+
+	flagConfigPath = filepath.Join(home, "override-flag.yaml")
 	defer func() { flagConfigPath = "" }()
 	if got, err := resolveConfigPath(); err != nil || got != flagConfigPath {
 		t.Fatalf("resolveConfigPath() with flag = (%q, %v), want flag path", got, err)
 	}
 	flagConfigPath = ""
-	t.Setenv("VSYNC_CONFIG", filepath.Join(home, "env.yaml"))
-	if got, err := resolveConfigPath(); err != nil || got != filepath.Join(home, "env.yaml") {
+	t.Setenv("VSYNC_CONFIG", filepath.Join(home, "override-env.yaml"))
+	if got, err := resolveConfigPath(); err != nil || got != filepath.Join(home, "override-env.yaml") {
 		t.Fatalf("resolveConfigPath() with env = (%q, %v), want env path", got, err)
 	}
 	t.Setenv("VSYNC_CONFIG", "")
-	got, err := resolveConfigPath()
+	got, err = resolveConfigPath()
 	if err != nil {
 		t.Fatalf("resolveConfigPath() default error = %v", err)
 	}
-	want := filepath.Join(home, ".config", "vsync", "config.yaml")
-	if got != want {
-		t.Fatalf("resolveConfigPath() default = %q, want %q", got, want)
+	if got != "" {
+		t.Fatalf("resolveConfigPath() default = %q, want empty", got)
 	}
 }
 
@@ -189,7 +214,7 @@ func TestRootCmdRegistersCommandsAndFlags(t *testing.T) {
 			t.Fatalf("root command missing %q", want)
 		}
 	}
-	for _, want := range []string{"vault-addr", "vault-token", "config", "key"} {
+	for _, want := range []string{"vault-addr", "vault-token", "global-config", "config", "key"} {
 		if root.PersistentFlags().Lookup(want) == nil {
 			t.Fatalf("missing flag %q", want)
 		}
@@ -276,8 +301,9 @@ func TestPersistentPreRunSkipsInit(t *testing.T) {
 func TestDefaultConfigPathAndDieAndMain(t *testing.T) {
 	origHome := userHomeDirFn
 	userHomeDirFn = func() (string, error) { return "", errors.New("boom") }
-	if _, err := defaultConfigPath(); err == nil || err.Error() != "boom" {
-		t.Fatalf("defaultConfigPath() error = %v, want boom", err)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	if _, err := defaultGlobalConfigPath(); err == nil || err.Error() != "boom" {
+		t.Fatalf("defaultGlobalConfigPath() error = %v, want boom", err)
 	}
 	userHomeDirFn = origHome
 
