@@ -175,6 +175,64 @@ func TestExecCmdInjectsConfiguredEnv(t *testing.T) {
 	}
 }
 
+func TestExecCmdSkipsSecretsWhenFilterDoesNotMatch(t *testing.T) {
+	_, key, cfgPath := setupExecTest(t)
+	if err := os.WriteFile(cfgPath, []byte("env:\n  commands:\n    - name: pi\n      filter: args.exists(a, a == \"--with-secrets\")\n      variables:\n        - name: GEMINI_API_KEY\n          key: gemini-api-key\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	origLoad := loadCredsFn
+	origClient := newVaultClientFn
+	origSecret := getCachedEnvSecret
+	origExec := execRealCommand
+	defer func() {
+		loadCredsFn = origLoad
+		newVaultClientFn = origClient
+		getCachedEnvSecret = origSecret
+		execRealCommand = origExec
+	}()
+
+	loadCredsFn = func(*state.Dirs, []byte, string, string) (*vlt.Credentials, error) {
+		t.Fatal("loadCredsFn should not be called when the filter does not match")
+		return nil, nil
+	}
+	newVaultClientFn = func(*vlt.Credentials, int) (*vlt.Client, error) {
+		t.Fatal("newVaultClientFn should not be called when the filter does not match")
+		return nil, nil
+	}
+	getCachedEnvSecret = func(*state.Dirs, []byte, *vlt.Client, string, string, ...string) (string, error) {
+		t.Fatal("getCachedEnvSecret should not be called when the filter does not match")
+		return "", nil
+	}
+	execRealCommand = func(name string, args []string, extraEnv map[string]string, shimDir string) error {
+		if name != "pi" {
+			t.Fatalf("name = %q, want pi", name)
+		}
+		if !reflect.DeepEqual(args, []string{"--plain"}) {
+			t.Fatalf("args = %#v, want [--plain]", args)
+		}
+		if extraEnv != nil {
+			t.Fatalf("extraEnv = %#v, want nil", extraEnv)
+		}
+		if shimDir != globalDirs.Shims {
+			t.Fatalf("shimDir = %q, want %q", shimDir, globalDirs.Shims)
+		}
+		return context.Canceled
+	}
+
+	if err := vlt.StoreCredentials(globalDirs, key, "http://addr", "token"); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := execCmd()
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	cmd.SetArgs([]string{"pi", "--plain"})
+	if err := cmd.ExecuteContext(context.Background()); err != context.Canceled {
+		t.Fatalf("execCmd() error = %v, want context.Canceled", err)
+	}
+}
+
 func TestExecCmdPropagatesConfigLoadError(t *testing.T) {
 	setupExecTest(t)
 	origLoad := loadConfigFn

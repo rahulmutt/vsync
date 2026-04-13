@@ -85,6 +85,9 @@ func statusCmd() *cobra.Command {
 						shimStatus = "  (shim present)"
 					}
 					fmt.Printf("  %-20s %s\n", c.Name, shimStatus)
+					if c.Filter != "" {
+						fmt.Printf("    filter = %s\n", c.Filter)
+					}
 					for _, v := range c.Variables {
 						profileName := v.Profile
 						if profileName == "" {

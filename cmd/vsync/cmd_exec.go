@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+	"github.com/vsync/vsync/internal/celfilter"
 	"github.com/vsync/vsync/internal/config"
 	"github.com/vsync/vsync/internal/shell"
 	"github.com/vsync/vsync/internal/state"
@@ -51,6 +52,16 @@ func execConfiguredCommand(cfg *config.Config, commandName string, commandArgs [
 	if entry == nil {
 		// No config for this command — exec it directly without modifications.
 		return execRealCommand(commandName, commandArgs, nil, dirs.Shims)
+	}
+
+	if entry.Filter != "" {
+		matched, err := celfilter.Matches(entry.Filter, commandArgs)
+		if err != nil {
+			return fmt.Errorf("evaluate filter for command %q: %w", commandName, err)
+		}
+		if !matched {
+			return execRealCommand(commandName, commandArgs, nil, dirs.Shims)
+		}
 	}
 
 	// Fetch secrets for each variable.

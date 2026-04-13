@@ -98,7 +98,7 @@ func captureStdoutStderr(t *testing.T, fn func()) string {
 
 func TestStatusCmdReportsConfiguredState(t *testing.T) {
 	dirs, key, cfgPath := setupStatusTest(t)
-	if err := os.WriteFile(cfgPath, []byte("vault:\n  kv_version: 2\nenv:\n  commands:\n    - name: pi\n      variables:\n        - name: GEMINI_API_KEY\n          key: gemini-api-key\nfiles:\n  - path: ~/missing.txt\n    key: notes\n"), 0600); err != nil {
+	if err := os.WriteFile(cfgPath, []byte("vault:\n  kv_version: 2\nenv:\n  commands:\n    - name: pi\n      filter: args.size() > 0\n      variables:\n        - name: GEMINI_API_KEY\n          key: gemini-api-key\nfiles:\n  - path: ~/missing.txt\n    key: notes\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := shim.Ensure(dirs, []string{"pi"}); err != nil {
@@ -142,6 +142,7 @@ func TestStatusCmdReportsConfiguredState(t *testing.T) {
 		"Configured commands (1):",
 		"pi",
 		"(shim present)",
+		"filter = args.size() > 0",
 		"GEMINI_API_KEY = gemini-api-key",
 		"cached (expires in",
 		"File sync entries (1):",

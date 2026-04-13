@@ -58,9 +58,10 @@ type EnvConfig struct {
 	Commands []CommandEntry `yaml:"commands"`
 }
 
-// CommandEntry maps a command name to vault-sourced variables.
+// CommandEntry maps a command name to an optional CEL filter and vault-sourced variables.
 type CommandEntry struct {
 	Name      string          `yaml:"name"`
+	Filter    string          `yaml:"filter"` // CEL expression over command args; inject only when true
 	Variables []VariableEntry `yaml:"variables"`
 }
 
@@ -310,6 +311,9 @@ func mergeCommands(base []CommandEntry, overlay []CommandEntry) []CommandEntry {
 }
 
 func mergeCommand(base, overlay CommandEntry) CommandEntry {
+	if overlay.Filter != "" {
+		base.Filter = overlay.Filter
+	}
 	base.Variables = mergeVariables(base.Variables, overlay.Variables)
 	return base
 }

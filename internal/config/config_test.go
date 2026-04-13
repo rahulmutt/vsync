@@ -451,6 +451,7 @@ func TestLoadSupportsProfilesAndReferenceProfiles(t *testing.T) {
 env:
   commands:
     - name: pi
+      filter: args.size() > 0
       variables:
         - name: GEMINI_API_KEY
           key: gemini
@@ -479,6 +480,9 @@ files:
 	pi := cfg.FindCommand("pi")
 	if pi == nil {
 		t.Fatal("FindCommand(pi) = nil")
+	}
+	if got, want := pi.Filter, "args.size() > 0"; got != want {
+		t.Fatalf("command filter = %q, want %q", got, want)
 	}
 	if got, want := pi.Variables[0].Profile, "prod"; got != want {
 		t.Fatalf("variable profile = %q, want %q", got, want)
@@ -530,6 +534,16 @@ func TestMergeVaultProfileOverlaysAllFields(t *testing.T) {
 	want := VaultProfileConfig{Addr: "addr", Token: "token", EnvPrefix: "env", FilesPrefix: "files", KVVersion: 2}
 	if got != want {
 		t.Fatalf("mergeVaultProfile(all fields) = %#v, want %#v", got, want)
+	}
+}
+
+func TestMergeCommandOverlaysFilterAndVariables(t *testing.T) {
+	got := mergeCommand(CommandEntry{Name: "pi", Filter: "args.size() > 0", Variables: []VariableEntry{{Name: "A", Key: "a"}}}, CommandEntry{Filter: "args[0] == \"chat\"", Variables: []VariableEntry{{Name: "B", Key: "b"}}})
+	if got.Filter != "args[0] == \"chat\"" {
+		t.Fatalf("mergeCommand filter = %q", got.Filter)
+	}
+	if len(got.Variables) != 2 || got.Variables[0].Name != "A" || got.Variables[1].Name != "B" {
+		t.Fatalf("mergeCommand variables = %#v", got.Variables)
 	}
 }
 

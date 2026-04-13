@@ -54,6 +54,7 @@ vault:
 env:
   commands:
     - name: pi
+      filter: 'args.exists(a, a == "--with-secrets")'
       variables:
         - name: GEMINI_API_KEY
           key: gemini-api-key
@@ -145,6 +146,12 @@ files:
 - If `profile` is omitted, the default profile is used.
 - `env_prefix`, `files_prefix`, and `kv_version` default per profile if omitted.
 
+### Command filters
+
+Each `env.commands` entry may set `filter:` to a CEL expression evaluated against the command arguments as `args` (a `list<string>`).
+If the expression returns `true`, secrets are injected as usual.
+If it returns `false`, the command runs without any Vault-derived environment variables.
+
 ### Vault paths
 
 The vault path is built as:
@@ -185,6 +192,7 @@ It syncs files, writes shims, then execs into the shell with `PATH` prefixed by 
 Internal entry-point used by shims.
 
 - resolves the configured command
+- evaluates the command `filter` CEL expression against the command arguments, when present
 - chooses the profile for each variable
 - reads the encrypted cache or fetches from Vault
 - execs the real binary with the fetched environment variables
