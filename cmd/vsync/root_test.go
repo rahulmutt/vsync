@@ -426,6 +426,28 @@ func TestPersistentPreRunSkipsInit(t *testing.T) {
 	}
 }
 
+func TestPersistentPreRunSkipsExecDryRun(t *testing.T) {
+	called := false
+	orig := resolveDirsFn
+	resolveDirsFn = func() (*state.Dirs, error) {
+		called = true
+		return nil, errors.New("should not resolve dirs")
+	}
+	defer func() { resolveDirsFn = orig }()
+
+	root := rootCmd()
+	exec := execCmd()
+	if err := exec.Flags().Set("dry-run", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if err := root.PersistentPreRunE(exec, nil); err != nil {
+		t.Fatalf("PersistentPreRunE(exec --dry-run) error = %v", err)
+	}
+	if called {
+		t.Fatal("PersistentPreRunE(exec --dry-run) unexpectedly resolved dirs")
+	}
+}
+
 func TestDefaultConfigPathAndDieAndMain(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "xdg-config"))
 	if got, err := defaultGlobalConfigPath(); err != nil || got != filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "vsync", "config.yaml") {

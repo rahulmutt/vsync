@@ -375,3 +375,42 @@ func TestExecCmdDryRunReportsFilterMismatch(t *testing.T) {
 		}
 	}
 }
+
+func TestDryRunConfiguredCommandBranches(t *testing.T) {
+	var out bytes.Buffer
+
+	t.Run("resolve error", func(t *testing.T) {
+		gotErr := dryRunConfiguredCommand(&out, &config.Config{Env: config.EnvConfig{Commands: []config.CommandEntry{{Name: "pi", Filter: "args["}}}}, "pi", nil)
+		if gotErr == nil || !strings.Contains(gotErr.Error(), "evaluate filter for command \"pi\"") {
+			t.Fatalf("dryRunConfiguredCommand() error = %v, want filter error", gotErr)
+		}
+	})
+
+	t.Run("unconfigured command", func(t *testing.T) {
+		out.Reset()
+		if err := dryRunConfiguredCommand(&out, &config.Config{}, "pi", nil); err != nil {
+			t.Fatalf("dryRunConfiguredCommand() error = %v, want nil", err)
+		}
+		if got := out.String(); !strings.Contains(got, "vsync: command is not configured; no environment variables would be injected") {
+			t.Fatalf("dry-run output = %q, want unconfigured message", got)
+		}
+	})
+
+	t.Run("no filter and no variables", func(t *testing.T) {
+		out.Reset()
+		cfg := &config.Config{Env: config.EnvConfig{Commands: []config.CommandEntry{{Name: "pi"}}}}
+		if err := dryRunConfiguredCommand(&out, cfg, "pi", nil); err != nil {
+			t.Fatalf("dryRunConfiguredCommand() error = %v, want nil", err)
+		}
+		got := out.String()
+		for _, want := range []string{
+			"vsync: dry-run for \"pi\"",
+			"vsync: filter matched: true (no filter configured)",
+			"vsync: environment variables to inject: none",
+		} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("dry-run output = %q, want %q", got, want)
+			}
+		}
+	})
+}
