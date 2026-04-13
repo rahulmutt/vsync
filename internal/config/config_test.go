@@ -486,11 +486,50 @@ files:
 	if got, want := cfg.Files[0].Profile, "prod"; got != want {
 		t.Fatalf("file profile = %q, want %q", got, want)
 	}
+	if got, err := cfg.VaultProfile(""); err != nil || got.Addr != "http://default:8200" {
+		t.Fatalf("VaultProfile(empty) = %#v, %v", got, err)
+	}
 	if got, err := cfg.VaultProfile("default"); err != nil || got.Addr != "http://default:8200" {
 		t.Fatalf("VaultProfile(default) = %#v, %v", got, err)
 	}
 	if _, err := cfg.VaultProfile("missing"); err == nil {
 		t.Fatal("VaultProfile(missing) error = nil, want error")
+	}
+}
+
+func TestVaultProfileDefaultAndMissing(t *testing.T) {
+	cfg := &Config{Vault: VaultConfig{VaultProfileConfig: VaultProfileConfig{Addr: "http://default:8200"}, Profiles: map[string]VaultProfileConfig{"prod": {Addr: "http://prod:8200"}}}}
+	if got, err := cfg.VaultProfile(""); err != nil || got.Addr != "http://default:8200" {
+		t.Fatalf("VaultProfile(empty) = %#v, %v", got, err)
+	}
+	if got, err := cfg.VaultProfile("default"); err != nil || got.Addr != "http://default:8200" {
+		t.Fatalf("VaultProfile(default) = %#v, %v", got, err)
+	}
+	if got, err := cfg.VaultProfile("prod"); err != nil || got.Addr != "http://prod:8200" {
+		t.Fatalf("VaultProfile(prod) = %#v, %v", got, err)
+	}
+	if _, err := cfg.VaultProfile("missing"); err == nil {
+		t.Fatal("VaultProfile(missing) error = nil, want error")
+	}
+}
+
+func TestMergeVaultProfileKeepsBaseValuesWhenOverlayEmpty(t *testing.T) {
+	base := VaultProfileConfig{Addr: "http://base:8200", Token: "base-token", EnvPrefix: "base/env", FilesPrefix: "base/files", KVVersion: 1}
+	got := mergeVaultProfile(base, VaultProfileConfig{})
+	if got != base {
+		t.Fatalf("mergeVaultProfile(empty overlay) = %#v, want %#v", got, base)
+	}
+	got = mergeVaultProfile(VaultProfileConfig{}, VaultProfileConfig{KVVersion: 2})
+	if got.KVVersion != 2 || got.Addr != "" || got.Token != "" || got.EnvPrefix != "" || got.FilesPrefix != "" {
+		t.Fatalf("mergeVaultProfile(kv only) = %#v", got)
+	}
+}
+
+func TestMergeVaultProfileOverlaysAllFields(t *testing.T) {
+	got := mergeVaultProfile(VaultProfileConfig{Addr: "base", Token: "base-token", EnvPrefix: "base/env", FilesPrefix: "base/files", KVVersion: 1}, VaultProfileConfig{Addr: "addr", Token: "token", EnvPrefix: "env", FilesPrefix: "files", KVVersion: 2})
+	want := VaultProfileConfig{Addr: "addr", Token: "token", EnvPrefix: "env", FilesPrefix: "files", KVVersion: 2}
+	if got != want {
+		t.Fatalf("mergeVaultProfile(all fields) = %#v, want %#v", got, want)
 	}
 }
 
@@ -536,5 +575,49 @@ func TestLoadReportsParseError(t *testing.T) {
 	}
 	if _, err := Load(cfgPath); err == nil {
 		t.Fatal("Load() error = nil, want parse error")
+	}
+}
+
+func TestMergeProfilesAndVaultProfileMerge(t *testing.T) {
+	base := map[string]VaultProfileConfig{
+		"prod": {
+			Addr:        "http://prod-old:8200",
+			Token:       "old-token",
+			EnvPrefix:   "old/env",
+			FilesPrefix: "old/files",
+			KVVersion:   1,
+		},
+	}
+	overlay := map[string]VaultProfileConfig{
+		"prod": {
+			Token:     "new-token",
+			KVVersion: 2,
+		},
+		"dev": {
+			Addr:      "http://dev:8200",
+			Token:     "dev-token",
+			KVVersion: 1,
+		},
+	}
+
+	got := mergeProfiles(base, overlay)
+	if len(got) != 2 {
+		t.Fatalf("mergeProfiles() len = %d, want 2", len(got))
+	}
+	if got["prod"].Addr != "http://prod-old:8200" || got["prod"].Token != "new-token" || got["prod"].EnvPrefix != "old/env" || got["prod"].FilesPrefix != "old/files" || got["prod"].KVVersion != 2 {
+		t.Fatalf("merged prod profile = %#v", got["prod"])
+	}
+	if got["dev"].Addr != "http://dev:8200" || got["dev"].Token != "dev-token" {
+		t.Fatalf("merged dev profile = %#v", got["dev"])
+	}
+
+	got = mergeProfiles(nil, map[string]VaultProfileConfig{"one": {Addr: "http://one:8200"}})
+	if len(got) != 1 || got["one"].Addr != "http://one:8200" {
+		t.Fatalf("mergeProfiles(nil, overlay) = %#v", got)
+	}
+
+	merged := mergeVaultProfile(VaultProfileConfig{Addr: "keep", Token: "keep-token"}, VaultProfileConfig{EnvPrefix: "env", FilesPrefix: "files", KVVersion: 2})
+	if merged.Addr != "keep" || merged.Token != "keep-token" || merged.EnvPrefix != "env" || merged.FilesPrefix != "files" || merged.KVVersion != 2 {
+		t.Fatalf("mergeVaultProfile() = %#v", merged)
 	}
 }

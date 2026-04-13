@@ -323,6 +323,34 @@ func TestGetCachedFileSecretUsesFreshCacheAndFallsBackOnError(t *testing.T) {
 	}
 }
 
+func TestGetCachedSecretsWithProfileArgument(t *testing.T) {
+	base := t.TempDir()
+	dirs := &state.Dirs{Base: base, Keys: filepath.Join(base, "keys"), Tokens: filepath.Join(base, "tokens"), Cache: filepath.Join(base, "cache"), Shims: filepath.Join(base, "shims")}
+	if err := dirs.EnsureAll(); err != nil {
+		t.Fatal(err)
+	}
+	key := make([]byte, 32)
+	server := newMockVaultServer(t)
+	defer server.Close()
+	client, err := NewClient(&Credentials{Addr: server.URL, Token: "token"}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got, err := GetCachedEnvSecret(dirs, key, client, "secret/data/vsync/env", "gemini-api-key", "prod"); err != nil || got != "from-kv2" {
+		t.Fatalf("GetCachedEnvSecret(profile) = %q, %v", got, err)
+	}
+	if got, err := GetCachedFileSecret(dirs, key, client, "secret/data/vsync/files", "example", "prod"); err != nil || got != "file-content" {
+		t.Fatalf("GetCachedFileSecret(profile) = %q, %v", got, err)
+	}
+	if _, err := os.Stat(dirs.CacheFile("env", "prod", "gemini-api-key")); err != nil {
+		t.Fatalf("profile env cache missing: %v", err)
+	}
+	if _, err := os.Stat(dirs.CacheFile("files", "prod", "example")); err != nil {
+		t.Fatalf("profile files cache missing: %v", err)
+	}
+}
+
 func TestNewClientAndCredentialsErrorPaths(t *testing.T) {
 	if _, err := NewClient(&Credentials{Addr: "://bad", Token: "token"}, 2); err == nil {
 		t.Fatal("NewClient() error = nil, want parse error")

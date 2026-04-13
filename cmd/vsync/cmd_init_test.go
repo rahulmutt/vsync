@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -275,5 +276,66 @@ func TestInitCmdRotateKeyRegeneratesKey(t *testing.T) {
 	}
 	if string(before) == string(after) {
 		t.Fatal("rotate-key did not change key contents")
+	}
+}
+
+func TestInitCmdUsesStoredCredentialsWhenConfigOmitsThem(t *testing.T) {
+	dirs, home := setupInitTest(t)
+	keyPath := filepath.Join(home, "stored.key")
+	flagKeyPath = keyPath
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/auth/token/lookup-self" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"auth":{"lease_duration":1200}}`))
+	}))
+	defer server.Close()
+
+	key, err := crypto.GenerateKey(keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := vlt.StoreCredentials(dirs, key, server.URL, "stored-token"); err != nil {
+		t.Fatal(err)
+	}
+	promptFn = func(string, bool) (string, error) {
+		t.Fatal("promptFn should not be called when stored credentials exist")
+		return "", nil
+	}
+
+	cmd := initCmd()
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("initCmd() with stored credentials error = %v", err)
+	}
+
+	loaded, err := vlt.LoadCredentials(dirs, key, "", "")
+	if err != nil {
+		t.Fatalf("LoadCredentials() error = %v", err)
+	}
+	if loaded.Addr != server.URL || loaded.Token != "stored-token" {
+		t.Fatalf("loaded creds = %#v", loaded)
+	}
+}
+
+func TestInitCmdReportsClientCreationError(t *testing.T) {
+	_, home := setupInitTest(t)
+	keyPath := filepath.Join(home, "clientfail.key")
+	flagKeyPath = keyPath
+	flagVaultAddr = "http://127.0.0.1:8200"
+	flagVaultToken = "token"
+
+	origClient := newClientFn
+	defer func() { newClientFn = origClient }()
+	newClientFn = func(*vlt.Credentials, int) (*vlt.Client, error) { return nil, fmt.Errorf("client boom") }
+
+	cmd := initCmd()
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	if err := cmd.ExecuteContext(context.Background()); err == nil || !strings.Contains(err.Error(), "create vault client for profile \"default\"") || !strings.Contains(err.Error(), "client boom") {
+		t.Fatalf("initCmd() client error = %v", err)
 	}
 }

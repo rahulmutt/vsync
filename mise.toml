@@ -5,8 +5,41 @@ go = "1.26"
 [tasks.build]
 run = "go build -o dist/vsync ./cmd/vsync"
 
+[tasks.deps]
+description = "Download Go module dependencies"
+run = "go mod download"
+
+[tasks.tidy]
+description = "Tidy go.mod and go.sum"
+run = "go mod tidy"
+
+[tasks.go-get]
+description = "Add or update a Go dependency, then tidy modules"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ "$#" -lt 1 ]; then
+  echo "usage: mise run go-get -- <module>@<version> [<module>@<version> ...]" >&2
+  exit 2
+fi
+
+go get "$@"
+go mod tidy
+'''
+
 [tasks.test-unit]
-run = "go test ./..."
+description = "Run unit tests"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ "$#" -eq 0 ]; then
+  set -- ./...
+fi
+
+go test "$@"
+'''
 
 [tasks.test-integration]
 description = "Start devenv Vault, run integration tests, and tear it down"
@@ -21,8 +54,12 @@ cleanup() {
 cleanup
 trap cleanup EXIT
 
+if [ "$#" -eq 0 ]; then
+  set -- ./...
+fi
+
 devenv up --detach
-devenv shell -- go test -tags integration ./...
+devenv shell -- go test -tags integration "$@"
 '''
 
 [tasks.test]
@@ -41,6 +78,24 @@ trap cleanup EXIT
 go test ./...
 devenv up --detach
 devenv shell -- go test -tags integration ./...
+'''
+
+[tasks.coverage]
+description = "Run unit and integration coverage checks"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+
+cleanup() {
+  devenv processes down >/dev/null 2>&1 || true
+}
+
+cleanup
+trap cleanup EXIT
+
+go test -cover ./...
+devenv up --detach
+devenv shell -- go test -cover -tags integration ./...
 '''
 
 [tasks.install]

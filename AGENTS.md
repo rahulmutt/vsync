@@ -34,12 +34,11 @@ The authoritative design lives in **`SPEC.md`**. When in doubt, defer to `SPEC.m
 
 ```sh
 mise install          # installs Go 1.26 and any other tools in mise.toml
-go mod download       # fetch all Go dependencies
+mise run deps         # fetch all Go dependencies
 mise run build        # produces dist/vsync
 ```
 
-Do **not** manually change `go.mod` / `go.sum`; use `go get` / `go mod tidy` then commit
-both files together.
+Do **not** manually change `go.mod` / `go.sum`; use `mise run go-get -- ...` / `mise run tidy` then commit both files together.
 
 ---
 
@@ -85,7 +84,13 @@ All day-to-day operations go through `mise run <task>`:
 | Command | What it does |
 |---------|-------------|
 | `mise run build` | `go build -o dist/vsync ./cmd/vsync` |
-| `mise run test` | `go test ./...` |
+| `mise run deps` | `go mod download` |
+| `mise run tidy` | `go mod tidy` |
+| `mise run go-get -- ...` | `go get ...` followed by `go mod tidy` |
+| `mise run test` | full unit + devenv-backed integration test suite |
+| `mise run test-unit` | `go test ./...` |
+| `mise run test-integration` | devenv-backed `go test -tags integration ./...` |
+| `mise run coverage` | unit + integration coverage checks |
 | `mise run install` | `go install ./cmd/vsync` (installs to `$GOPATH/bin`) |
 
 > **Always run `mise run build` after editing Go source** to verify compilation.
@@ -261,8 +266,8 @@ Use `state.WriteAtomic` for all writes (temp file + rename = atomic).
 ## 10. Adding a New Go Dependency
 
 ```sh
-go get github.com/some/package@latest
-go mod tidy
+mise run go-get -- github.com/some/package@latest
+mise run tidy
 ```
 
 Commit `go.mod` and `go.sum` together. Run `mise run build` and `mise run test` before
@@ -275,9 +280,11 @@ committing.
 Tests live alongside source (e.g. `internal/crypto/crypto_test.go`).
 
 ```sh
-mise run test          # runs all tests
-go test ./internal/... # run only library tests
-go test -run TestFoo ./internal/crypto/  # run a specific test
+mise run test              # runs unit tests and devenv-backed integration tests
+mise run test-unit         # run only unit tests
+mise run test-unit -- ./internal/... # run only library tests
+mise run test-unit -- -run TestFoo ./internal/crypto/  # run a specific test
+mise run test-integration  # run integration tests only
 ```
 
 - Use `t.TempDir()` for temporary files (auto-cleaned).
@@ -285,6 +292,21 @@ go test -run TestFoo ./internal/crypto/  # run a specific test
   the crypto/state/config layers directly.
 - For integration tests that need Vault, gate them with `t.Skip()` unless
   `VAULT_ADDR` and `VAULT_TOKEN` are set in the environment.
+
+### Test coverage
+
+When changing code, check coverage for both unit tests and integration tests in
+the touched packages, and add or update tests if coverage drops or a code path is
+no longer exercised.
+
+A good default check is:
+
+```sh
+mise run coverage
+```
+
+If a change introduces new behavior, make sure there is a test covering it before
+considering the task complete.
 
 ### Integration testing with `devenv.nix`
 
@@ -301,11 +323,7 @@ Dev mode keeps all state in memory, so every `devenv up` starts from a clean sla
 Typical loop:
 
 ```sh
-devenv up           # foreground: starts `vault server -dev` via process-compose
-# in another terminal
-devenv shell        # VAULT_ADDR / VAULT_TOKEN already in env
-seed-vault          # seeds secret/vsync/env/* and secret/vsync/files/* samples
-go test ./...       # integration tests pick up VAULT_ADDR / VAULT_TOKEN
+mise run test-integration  # integration tests pick up VAULT_ADDR / VAULT_TOKEN
 ```
 
 Implementation notes for agents modifying `devenv.nix`:
@@ -445,5 +463,5 @@ slsa-verifier verify-artifact vsync-<os>-<arch> \
 - Version metadata is read from `git describe --tags --always --dirty`. Keep
   `main.version`, `main.commit`, and `main.date` as package-level vars in
   `cmd/vsync/main.go` so the `-ldflags -X` injections keep working.
-- Never add build steps that require network access beyond `go mod download` —
+- Never add build steps that require network access beyond `mise run deps` —
   the SLSA3 builder runs in a locked-down environment and will fail otherwise.

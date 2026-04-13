@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vsync/vsync/internal/config"
 	"github.com/vsync/vsync/internal/crypto"
 	"github.com/vsync/vsync/internal/shim"
 	"github.com/vsync/vsync/internal/state"
@@ -170,5 +171,20 @@ func TestStatusCmdReportsMissingCredentials(t *testing.T) {
 	})
 	if !strings.Contains(out, "Credentials:") || !strings.Contains(out, "NOT FOUND") {
 		t.Fatalf("status output missing credentials warning:\n%s", out)
+	}
+}
+
+func TestProfileSummary(t *testing.T) {
+	if got, want := profileSummary(config.VaultProfileConfig{}), "addr=(credentials not configured) env= files= kv=0"; got != want {
+		t.Fatalf("profileSummary(empty) = %q, want %q", got, want)
+	}
+	short := profileSummary(config.VaultProfileConfig{Addr: "http://short", EnvPrefix: "env", FilesPrefix: "files", KVVersion: 1})
+	if !strings.Contains(short, "addr=http://short") || !strings.Contains(short, "env=env") || !strings.Contains(short, "files=files") || !strings.Contains(short, "kv=1") {
+		t.Fatalf("profileSummary(short) = %q", short)
+	}
+	long := strings.Repeat("a", 50)
+	got := profileSummary(config.VaultProfileConfig{Addr: long, EnvPrefix: "env", FilesPrefix: "files", KVVersion: 2})
+	if !strings.Contains(got, long[:40]+"…") || !strings.Contains(got, "env=env") || !strings.Contains(got, "files=files") || !strings.Contains(got, "kv=2") {
+		t.Fatalf("profileSummary(long) = %q", got)
 	}
 }

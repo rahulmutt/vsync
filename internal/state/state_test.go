@@ -258,3 +258,43 @@ func TestDefaultDirsAndWriteAtomicErrorPaths(t *testing.T) {
 		t.Fatalf("WriteAtomic() rename error = %v, want rename fail", err)
 	}
 }
+
+func TestProfileTokenFileCacheFileAndSafePathPart(t *testing.T) {
+	dirs := &Dirs{
+		Base:   t.TempDir(),
+		Keys:   filepath.Join(t.TempDir(), "keys"),
+		Tokens: filepath.Join(t.TempDir(), "tokens"),
+		Cache:  filepath.Join(t.TempDir(), "cache"),
+		Shims:  filepath.Join(t.TempDir(), "shims"),
+	}
+
+	if got, want := dirs.ProfileTokenFile("", "vault_addr"), dirs.TokenFile("vault_addr"); got != want {
+		t.Fatalf("ProfileTokenFile(default) = %q, want %q", got, want)
+	}
+	if got, want := dirs.ProfileTokenFile("prod/team", "vault_addr"), filepath.Join(dirs.Tokens, "prod_team", "vault_addr.enc"); got != want {
+		t.Fatalf("ProfileTokenFile(profile) = %q, want %q", got, want)
+	}
+	if got, want := dirs.CacheFile("env", "gemini/api-key"), filepath.Join(dirs.Cache, "env", "gemini_api-key.enc"); got != want {
+		t.Fatalf("CacheFile(default) = %q, want %q", got, want)
+	}
+	if got, want := dirs.CacheFile("env", "prod/team", "gemini/api-key"), filepath.Join(dirs.Cache, "env", "prod_team", "gemini_api-key.enc"); got != want {
+		t.Fatalf("CacheFile(profile) = %q, want %q", got, want)
+	}
+	if got, want := safePathPart(" \t "), "default"; got != want {
+		t.Fatalf("safePathPart(blank) = %q, want %q", got, want)
+	}
+	if got, want := safePathPart("a/b\\c"), "a_b_c"; got != want {
+		t.Fatalf("safePathPart(sanitized) = %q, want %q", got, want)
+	}
+}
+
+func TestCacheFilePanicsOnBadArity(t *testing.T) {
+	dirs := &Dirs{Base: t.TempDir(), Keys: filepath.Join(t.TempDir(), "keys"), Tokens: filepath.Join(t.TempDir(), "tokens"), Cache: filepath.Join(t.TempDir(), "cache"), Shims: filepath.Join(t.TempDir(), "shims")}
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("CacheFile() did not panic on invalid arity")
+		}
+	}()
+	_ = dirs.CacheFile("env")
+	_ = dirs.CacheFile("env", "a", "b", "c")
+}

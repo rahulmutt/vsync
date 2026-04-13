@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -245,4 +246,85 @@ func TestSyncCmdPropagatesConfigLoadError(t *testing.T) {
 	if err := cmd.ExecuteContext(context.Background()); err == nil || !strings.Contains(err.Error(), "cfg") {
 		t.Fatalf("syncCmd() error = %v, want cfg error", err)
 	}
+}
+
+func TestSyncFilesCoversErrorBranches(t *testing.T) {
+	dirs, key, _ := setupSyncTest(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/secret/data/vsync/files/ok":
+			fmt.Fprint(w, `{"data":{"data":{"content":"ok-content"},"metadata":{}}}`)
+		case "/v1/secret/data/vsync/files/broken":
+			fmt.Fprint(w, `{"data":{"data":{"content":"broken-content"},"metadata":{}}}`)
+		case "/v1/secret/data/vsync/files/full":
+			fmt.Fprint(w, `{"data":{"data":{"content":"full-content"},"metadata":{}}}`)
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	if err := vlt.StoreCredentials(dirs, key, server.URL, "token"); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{
+		Vault: config.VaultConfig{
+			VaultProfileConfig: config.VaultProfileConfig{FilesPrefix: "secret/data/vsync/files", KVVersion: 2},
+			Profiles: map[string]config.VaultProfileConfig{
+				"broken": {Addr: server.URL, Token: "token", FilesPrefix: "secret/data/vsync/files", KVVersion: 2},
+			},
+		},
+		Files: []config.FileEntry{
+			{Key: "missing-profile", Path: filepath.Join(t.TempDir(), "missing.txt"), Profile: "nope"},
+			{Key: "broken", Path: filepath.Join(t.TempDir(), "broken.txt"), Profile: "broken"},
+			{Key: "ok", Path: filepath.Join(t.TempDir(), "ok.txt")},
+			{Key: "full", Path: "/dev/full"},
+		},
+	}
+
+	origClient := newVaultClientFn
+	defer func() { newVaultClientFn = origClient }()
+	newVaultClientFn = func(creds *vlt.Credentials, kvVersion int) (*vlt.Client, error) {
+		if creds.Addr == server.URL && creds.Token == "token" && kvVersion == 2 {
+			return origClient(creds, kvVersion)
+		}
+		return nil, fmt.Errorf("client fail for %s", creds.Addr)
+	}
+
+	out := captureOutput(t, func() { syncFiles(dirs, key, nil, cfg) })
+	for _, want := range []string{"file sync missing-profile (nope)", "synced broken →", "synced ok →", "write /dev/full"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("syncFiles output missing %q:\n%s", want, out)
+		}
+	}
+	if data, err := os.ReadFile(cfg.Files[2].Path); err != nil || string(data) != "ok-content" {
+		t.Fatalf("synced file = %q, %v", data, err)
+	}
+}
+
+func captureOutput(t *testing.T, fn func()) string {
+	t.Helper()
+	oldOut, oldErr := os.Stdout, os.Stderr
+	rOut, wOut, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rErr, wErr, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = wOut
+	os.Stderr = wErr
+	defer func() {
+		os.Stdout = oldOut
+		os.Stderr = oldErr
+	}()
+	outC := make(chan string, 1)
+	errC := make(chan string, 1)
+	go func() { b, _ := io.ReadAll(rOut); outC <- string(b) }()
+	go func() { b, _ := io.ReadAll(rErr); errC <- string(b) }()
+	fn()
+	_ = wOut.Close()
+	_ = wErr.Close()
+	return <-outC + <-errC
 }

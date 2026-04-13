@@ -13,6 +13,7 @@ import (
 	"github.com/vsync/vsync/internal/config"
 	"github.com/vsync/vsync/internal/crypto"
 	"github.com/vsync/vsync/internal/state"
+	vlt "github.com/vsync/vsync/internal/vault"
 )
 
 func TestResolveHelpers(t *testing.T) {
@@ -471,5 +472,102 @@ func TestToSet(t *testing.T) {
 	set := toSet([]string{"a", "b", "a"})
 	if len(set) != 2 || !set["a"] || !set["b"] {
 		t.Fatalf("toSet() = %#v", set)
+	}
+}
+
+func TestResolveVaultCredentialsForProfile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("VAULT_ADDR", "")
+	t.Setenv("VAULT_TOKEN", "")
+	flagVaultAddr = ""
+	flagVaultToken = ""
+	defer func() {
+		flagVaultAddr = ""
+		flagVaultToken = ""
+	}()
+
+	dirs, err := state.DefaultDirs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := dirs.EnsureAll(); err != nil {
+		t.Fatal(err)
+	}
+	key, err := crypto.GenerateKey(dirs.KeyFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := vlt.StoreCredentials(dirs, key, "http://stored-default:8200", "stored-default-token"); err != nil {
+		t.Fatal(err)
+	}
+	if err := vlt.StoreCredentialsForProfile(dirs, key, "prod", "http://stored-prod:8200", "stored-prod-token"); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{
+		Vault: config.VaultConfig{
+			VaultProfileConfig: config.VaultProfileConfig{},
+			Profiles: map[string]config.VaultProfileConfig{
+				"prod": {
+					Addr:        "http://prod-config:8200",
+					Token:       "prod-config-token",
+					EnvPrefix:   "prod/env",
+					FilesPrefix: "prod/files",
+					KVVersion:   1,
+				},
+				"fallback": {
+					Addr:        "http://fallback:8200",
+					Token:       "fallback-token",
+					EnvPrefix:   "fallback/env",
+					FilesPrefix: "fallback/files",
+					KVVersion:   2,
+				},
+				"broken": {},
+			},
+		},
+	}
+
+	flagVaultAddr = "http://flag-default:8200"
+	flagVaultToken = "flag-default-token"
+	creds, err := resolveVaultCredentialsForProfile(cfg, dirs, key, "")
+	if err != nil {
+		t.Fatalf("resolveVaultCredentialsForProfile(empty) error = %v", err)
+	}
+	if creds.Addr != "http://flag-default:8200" || creds.Token != "flag-default-token" {
+		t.Fatalf("resolveVaultCredentialsForProfile(empty) = %#v", creds)
+	}
+	flagVaultAddr = ""
+	flagVaultToken = ""
+
+	creds, err = resolveVaultCredentialsForProfile(cfg, dirs, key, "default")
+	if err != nil {
+		t.Fatalf("resolveVaultCredentialsForProfile(default) error = %v", err)
+	}
+	if creds.Addr != "http://stored-default:8200" || creds.Token != "stored-default-token" {
+		t.Fatalf("resolveVaultCredentialsForProfile(default) = %#v", creds)
+	}
+
+	creds, err = resolveVaultCredentialsForProfile(cfg, dirs, key, "prod")
+	if err != nil {
+		t.Fatalf("resolveVaultCredentialsForProfile(prod) error = %v", err)
+	}
+	if creds.Addr != "http://stored-prod:8200" || creds.Token != "stored-prod-token" {
+		t.Fatalf("resolveVaultCredentialsForProfile(prod) = %#v", creds)
+	}
+
+	if creds, err = resolveVaultCredentialsForProfile(cfg, dirs, key, "fallback"); err != nil {
+		t.Fatalf("resolveVaultCredentialsForProfile(fallback) error = %v", err)
+	}
+	if creds.Addr != "http://fallback:8200" || creds.Token != "fallback-token" {
+		t.Fatalf("resolveVaultCredentialsForProfile(fallback) = %#v", creds)
+	}
+
+	if _, err := resolveVaultCredentialsForProfile(cfg, dirs, key, "broken"); err == nil || !strings.Contains(err.Error(), "vault credentials for profile \"broken\" not found") {
+		t.Fatalf("resolveVaultCredentialsForProfile(broken) error = %v, want missing credentials", err)
+	}
+	if _, err := resolveVaultCredentialsForProfile(cfg, dirs, key, "missing"); err == nil {
+		t.Fatal("resolveVaultCredentialsForProfile(missing) error = nil, want missing profile")
 	}
 }

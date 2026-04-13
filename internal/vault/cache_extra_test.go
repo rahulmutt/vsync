@@ -119,3 +119,86 @@ func TestClearCacheKindReturnsReadDirError(t *testing.T) {
 		t.Fatal("ClearCacheKind() error = nil, want read-dir failure")
 	}
 }
+
+func TestWriteCacheValidationAndDeleteAllProfiles(t *testing.T) {
+	base := t.TempDir()
+	dirs := &state.Dirs{Base: base, Keys: filepath.Join(base, "keys"), Tokens: filepath.Join(base, "tokens"), Cache: filepath.Join(base, "cache"), Shims: filepath.Join(base, "shims")}
+	if err := dirs.EnsureAll(); err != nil {
+		t.Fatal(err)
+	}
+	key := testKey(t)
+	entry := &CacheEntry{Value: "x"}
+
+	if err := WriteCache(dirs, key, "env"); err == nil {
+		t.Fatal("WriteCache() error = nil, want missing cache name")
+	}
+	if err := WriteCache(dirs, key, "env", 123, entry); err == nil {
+		t.Fatal("WriteCache() error = nil, want cache path part type error")
+	}
+	if err := WriteCache(dirs, key, "env", "name", "not-an-entry"); err == nil {
+		t.Fatal("WriteCache() error = nil, want entry type error")
+	}
+
+	if err := WriteCache(dirs, key, "env", "foo", entry); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteCache(dirs, key, "env", "prod", "foo", entry); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteCache(dirs, key, "env", "dev", "foo", entry); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dirs.Cache, "env", "README"), []byte("keep"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dirs.Cache, "README"), []byte("top-level"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := DeleteCacheAllProfiles(dirs, "env", "foo"); err != nil {
+		t.Fatalf("DeleteCacheAllProfiles() error = %v", err)
+	}
+	for _, parts := range [][]string{{"foo"}, {"prod", "foo"}, {"dev", "foo"}} {
+		if got, err := ReadCache(dirs, key, "env", parts...); err != nil || got != nil {
+			t.Fatalf("ReadCache(%v) = (%#v, %v), want (nil, nil)", parts, got, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dirs.Cache, "env", "README")); err != nil {
+		t.Fatalf("non-directory entry removed unexpectedly: %v", err)
+	}
+}
+
+func TestDeleteCacheAllProfilesReturnsReadDirError(t *testing.T) {
+	base := t.TempDir()
+	dirs := &state.Dirs{Base: base, Keys: filepath.Join(base, "keys"), Tokens: filepath.Join(base, "tokens"), Cache: filepath.Join(base, "cache"), Shims: filepath.Join(base, "shims")}
+	if err := os.MkdirAll(dirs.Cache, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dirs.Cache, "env"), []byte("not a dir"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := DeleteCacheAllProfiles(dirs, "env", "foo"); err == nil {
+		t.Fatal("DeleteCacheAllProfiles() error = nil, want read-dir failure")
+	}
+}
+
+func TestDeleteCacheAllProfilesMissingDirectory(t *testing.T) {
+	dirs := &state.Dirs{Base: t.TempDir(), Keys: filepath.Join(t.TempDir(), "keys"), Tokens: filepath.Join(t.TempDir(), "tokens"), Cache: filepath.Join(t.TempDir(), "missing-cache"), Shims: filepath.Join(t.TempDir(), "shims")}
+	if err := DeleteCacheAllProfiles(dirs, "env", "foo"); err != nil {
+		t.Fatalf("DeleteCacheAllProfiles() missing dir error = %v", err)
+	}
+}
+
+func TestDeleteCacheAllProfilesReturnsDeleteError(t *testing.T) {
+	base := t.TempDir()
+	dirs := &state.Dirs{Base: base, Keys: filepath.Join(base, "keys"), Tokens: filepath.Join(base, "tokens"), Cache: filepath.Join(base, "cache"), Shims: filepath.Join(base, "shims")}
+	if err := os.MkdirAll(filepath.Join(dirs.Cache, "env", "foo.enc"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dirs.Cache, "env", "foo.enc", "child"), []byte("x"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := DeleteCacheAllProfiles(dirs, "env", "foo"); err == nil {
+		t.Fatal("DeleteCacheAllProfiles() error = nil, want delete failure")
+	}
+}
