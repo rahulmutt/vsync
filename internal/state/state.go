@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // Dirs holds the canonical paths under the vsync state and cache directories.
@@ -86,9 +87,34 @@ func (d *Dirs) TokenFile(name string) string {
 	return filepath.Join(d.Tokens, name+".enc")
 }
 
+// ProfileTokenFile returns the path for an encrypted token file scoped to a profile.
+func (d *Dirs) ProfileTokenFile(profile, name string) string {
+	if profile == "" || profile == "default" {
+		return d.TokenFile(name)
+	}
+	return filepath.Join(d.Tokens, safePathPart(profile), name+".enc")
+}
+
 // CacheFile returns the path for an encrypted cache entry under the cache dir.
-func (d *Dirs) CacheFile(kind, name string) string {
-	return filepath.Join(d.Cache, kind, name+".enc")
+// Backwards compatibility: CacheFile(kind, name) stores entries under the
+// implicit "default" profile, while CacheFile(kind, profile, name) stores them
+// under a profile-specific subdirectory.
+func (d *Dirs) CacheFile(kind string, parts ...string) string {
+	profile := "default"
+	name := ""
+	switch len(parts) {
+	case 1:
+		name = parts[0]
+	case 2:
+		profile = parts[0]
+		name = parts[1]
+	default:
+		panic("CacheFile requires name or profile+name")
+	}
+	if profile == "" || profile == "default" {
+		return filepath.Join(d.Cache, kind, safePathPart(name)+".enc")
+	}
+	return filepath.Join(d.Cache, kind, safePathPart(profile), safePathPart(name)+".enc")
 }
 
 // ShimFile returns the path for a shim script.
@@ -121,4 +147,15 @@ func WriteAtomic(path string, data []byte, mode os.FileMode) error {
 		return err
 	}
 	return renameFn(tmpName, path)
+}
+
+func safePathPart(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "default"
+	}
+	s = strings.ReplaceAll(s, string(os.PathSeparator), "_")
+	s = strings.ReplaceAll(s, "/", "_")
+	s = strings.ReplaceAll(s, "\\", "_")
+	return s
 }

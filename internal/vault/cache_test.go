@@ -59,14 +59,26 @@ func TestCacheRoundTripAndClear(t *testing.T) {
 	if err := WriteCache(dirs, key, "files", "two", entry); err != nil {
 		t.Fatal(err)
 	}
+	if err := WriteCache(dirs, key, "env", "prod", "one", entry); err != nil {
+		t.Fatal(err)
+	}
 	if err := ClearCacheKind(dirs, "env"); err != nil {
 		t.Fatalf("ClearCacheKind() error = %v", err)
 	}
 	if got, err := ReadCache(dirs, key, "env", "one"); err != nil || got != nil {
 		t.Fatalf("env cache not cleared: (%#v, %v)", got, err)
 	}
+	if got, err := ReadCache(dirs, key, "env", "prod", "one"); err != nil || got != nil {
+		t.Fatalf("profile env cache not cleared: (%#v, %v)", got, err)
+	}
 	if got, err := ReadCache(dirs, key, "files", "two"); err != nil || got == nil {
 		t.Fatalf("files cache should remain: (%#v, %v)", got, err)
+	}
+	if err := DeleteCacheAllProfiles(dirs, "files", "two"); err != nil {
+		t.Fatalf("DeleteCacheAllProfiles() error = %v", err)
+	}
+	if got, err := ReadCache(dirs, key, "files", "two"); err != nil || got != nil {
+		t.Fatalf("files cache not cleared: (%#v, %v)", got, err)
 	}
 }
 

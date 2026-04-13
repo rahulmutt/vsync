@@ -27,26 +27,31 @@ type Credentials struct {
 // LoadCredentials decrypts VAULT_ADDR and VAULT_TOKEN from the state directory.
 // If addrOverride / tokenOverride are non-empty they are used instead.
 func LoadCredentials(dirs *state.Dirs, key []byte, addrOverride, tokenOverride string) (*Credentials, error) {
+	return LoadCredentialsForProfile(dirs, key, "default", addrOverride, tokenOverride)
+}
+
+// LoadCredentialsForProfile decrypts the credentials for a given profile.
+func LoadCredentialsForProfile(dirs *state.Dirs, key []byte, profile, addrOverride, tokenOverride string) (*Credentials, error) {
 	addr := addrOverride
 	if addr == "" {
-		raw, err := decryptFileFn(key, dirs.TokenFile("vault_addr"))
+		raw, err := decryptFileFn(key, dirs.ProfileTokenFile(profile, "vault_addr"))
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
-				return nil, fmt.Errorf("vault credentials not found; run 'vsync init' first")
+				return nil, fmt.Errorf("vault credentials for profile %q not found; run 'vsync init' first", profile)
 			}
-			return nil, fmt.Errorf("decrypt vault_addr: %w", err)
+			return nil, fmt.Errorf("decrypt vault_addr for profile %q: %w", profile, err)
 		}
 		addr = string(raw)
 	}
 
 	token := tokenOverride
 	if token == "" {
-		raw, err := decryptFileFn(key, dirs.TokenFile("vault_token"))
+		raw, err := decryptFileFn(key, dirs.ProfileTokenFile(profile, "vault_token"))
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
-				return nil, fmt.Errorf("vault credentials not found; run 'vsync init' first")
+				return nil, fmt.Errorf("vault credentials for profile %q not found; run 'vsync init' first", profile)
 			}
-			return nil, fmt.Errorf("decrypt vault_token: %w", err)
+			return nil, fmt.Errorf("decrypt vault_token for profile %q: %w", profile, err)
 		}
 		token = string(raw)
 	}
@@ -56,11 +61,16 @@ func LoadCredentials(dirs *state.Dirs, key []byte, addrOverride, tokenOverride s
 
 // StoreCredentials encrypts and writes VAULT_ADDR and VAULT_TOKEN to the state directory.
 func StoreCredentials(dirs *state.Dirs, key []byte, addr, token string) error {
-	if err := encryptFileFn(key, dirs.TokenFile("vault_addr"), []byte(addr)); err != nil {
-		return fmt.Errorf("store vault_addr: %w", err)
+	return StoreCredentialsForProfile(dirs, key, "default", addr, token)
+}
+
+// StoreCredentialsForProfile encrypts and writes credentials for a profile.
+func StoreCredentialsForProfile(dirs *state.Dirs, key []byte, profile, addr, token string) error {
+	if err := encryptFileFn(key, dirs.ProfileTokenFile(profile, "vault_addr"), []byte(addr)); err != nil {
+		return fmt.Errorf("store vault_addr for profile %q: %w", profile, err)
 	}
-	if err := encryptFileFn(key, dirs.TokenFile("vault_token"), []byte(token)); err != nil {
-		return fmt.Errorf("store vault_token: %w", err)
+	if err := encryptFileFn(key, dirs.ProfileTokenFile(profile, "vault_token"), []byte(token)); err != nil {
+		return fmt.Errorf("store vault_token for profile %q: %w", profile, err)
 	}
 	return nil
 }
@@ -126,14 +136,7 @@ func (c *Client) GetFileSecret(prefix, key string) (*secretResult, error) {
 }
 
 func (c *Client) readSecret(path, field string) (*secretResult, error) {
-	var secret *vaultapi.Secret
-	var err error
-
-	if c.kvVersion == 2 {
-		secret, err = c.api.Logical().Read(path)
-	} else {
-		secret, err = c.api.Logical().Read(path)
-	}
+	secret, err := c.api.Logical().Read(path)
 	if err != nil {
 		return nil, fmt.Errorf("vault read %s: %w", path, err)
 	}
@@ -165,8 +168,15 @@ func (c *Client) readSecret(path, field string) (*secretResult, error) {
 }
 
 // GetCachedEnvSecret fetches from cache if valid, otherwise from Vault, and updates cache.
-func GetCachedEnvSecret(dirs *state.Dirs, key []byte, client *Client, prefix, secretKey string) (string, error) {
-	entry, _ := ReadCache(dirs, key, "env", secretKey)
+// Backwards compatibility: GetCachedEnvSecret(..., prefix, secretKey) uses the
+// default profile cache. Pass an additional profile name as the final optional
+// argument to scope the cache entry to a profile-specific source.
+func GetCachedEnvSecret(dirs *state.Dirs, key []byte, client *Client, prefix, secretKey string, profile ...string) (string, error) {
+	cacheProfile := "default"
+	if len(profile) > 0 && profile[0] != "" {
+		cacheProfile = profile[0]
+	}
+	entry, _ := ReadCache(dirs, key, "env", cacheProfile, secretKey)
 	if entry != nil && !entry.IsExpired() {
 		return entry.Value, nil
 	}
@@ -175,7 +185,7 @@ func GetCachedEnvSecret(dirs *state.Dirs, key []byte, client *Client, prefix, se
 	if err != nil {
 		// Fall back to stale cache if Vault is unavailable.
 		if entry != nil {
-			fmt.Fprintf(os.Stderr, "vsync: vault unavailable, using stale cache for %s\n", secretKey)
+			fmt.Fprintf(os.Stderr, "vsync: vault unavailable, using stale cache for %s (%s)\n", secretKey, cacheProfile)
 			return entry.Value, nil
 		}
 		return "", err
@@ -188,13 +198,20 @@ func GetCachedEnvSecret(dirs *state.Dirs, key []byte, client *Client, prefix, se
 	if result.LeaseDuration > 0 {
 		newEntry.ExpiresAt = time.Now().Add(result.LeaseDuration - cacheMargin)
 	}
-	_ = WriteCache(dirs, key, "env", secretKey, newEntry)
+	_ = WriteCache(dirs, key, "env", cacheProfile, secretKey, newEntry)
 	return result.Value, nil
 }
 
 // GetCachedFileSecret fetches from cache if valid, otherwise from Vault, and updates cache.
-func GetCachedFileSecret(dirs *state.Dirs, key []byte, client *Client, prefix, secretKey string) (string, error) {
-	entry, _ := ReadCache(dirs, key, "files", secretKey)
+// Backwards compatibility: GetCachedFileSecret(..., prefix, secretKey) uses the
+// default profile cache. Pass an additional profile name as the final optional
+// argument to scope the cache entry to a profile-specific source.
+func GetCachedFileSecret(dirs *state.Dirs, key []byte, client *Client, prefix, secretKey string, profile ...string) (string, error) {
+	cacheProfile := "default"
+	if len(profile) > 0 && profile[0] != "" {
+		cacheProfile = profile[0]
+	}
+	entry, _ := ReadCache(dirs, key, "files", cacheProfile, secretKey)
 	if entry != nil && !entry.IsExpired() {
 		return entry.Value, nil
 	}
@@ -202,7 +219,7 @@ func GetCachedFileSecret(dirs *state.Dirs, key []byte, client *Client, prefix, s
 	result, err := client.GetFileSecret(prefix, secretKey)
 	if err != nil {
 		if entry != nil {
-			fmt.Fprintf(os.Stderr, "vsync: vault unavailable, using stale cache for file %s\n", secretKey)
+			fmt.Fprintf(os.Stderr, "vsync: vault unavailable, using stale cache for file %s (%s)\n", secretKey, cacheProfile)
 			return entry.Value, nil
 		}
 		return "", err
@@ -215,6 +232,6 @@ func GetCachedFileSecret(dirs *state.Dirs, key []byte, client *Client, prefix, s
 	if result.LeaseDuration > 0 {
 		newEntry.ExpiresAt = time.Now().Add(result.LeaseDuration - cacheMargin)
 	}
-	_ = WriteCache(dirs, key, "files", secretKey, newEntry)
+	_ = WriteCache(dirs, key, "files", cacheProfile, secretKey, newEntry)
 	return result.Value, nil
 }

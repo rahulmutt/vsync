@@ -321,11 +321,11 @@ func TestExecCmdBranches(t *testing.T) {
 	if err := vlt.StoreCredentials(dirs, key, "http://vault", "token"); err != nil {
 		t.Fatal(err)
 	}
-	origLoadCfg, origLoadCreds, origClient, origSecret, origExec := loadConfigFn, loadVaultCredentials, newVaultClient, getCachedEnvSecret, execRealCommand
+	origLoadCfg, origLoadCreds, origClient, origSecret, origExec := loadConfigFn, loadCredsFn, newVaultClientFn, getCachedEnvSecret, execRealCommand
 	defer func() {
 		loadConfigFn = origLoadCfg
-		loadVaultCredentials = origLoadCreds
-		newVaultClient = origClient
+		loadCredsFn = origLoadCreds
+		newVaultClientFn = origClient
 		getCachedEnvSecret = origSecret
 		execRealCommand = origExec
 	}()
@@ -340,20 +340,20 @@ func TestExecCmdBranches(t *testing.T) {
 			t.Fatalf("exec error = %v, want cfg", err)
 		}
 		loadConfigFn = origLoadCfg
-		loadVaultCredentials = func(*state.Dirs, []byte, string, string) (*vlt.Credentials, error) { return nil, errors.New("creds") }
+		loadCredsFn = func(*state.Dirs, []byte, string, string) (*vlt.Credentials, error) { return nil, errors.New("creds") }
 		if err := cmd.ExecuteContext(context.Background()); err == nil || !strings.Contains(err.Error(), "creds") {
 			t.Fatalf("exec error = %v, want creds", err)
 		}
-		loadVaultCredentials = origLoadCreds
-		newVaultClient = func(*vlt.Credentials, int) (*vlt.Client, error) { return nil, errors.New("client") }
+		loadCredsFn = origLoadCreds
+		newVaultClientFn = func(*vlt.Credentials, int) (*vlt.Client, error) { return nil, errors.New("client") }
 		if err := cmd.ExecuteContext(context.Background()); err == nil || !strings.Contains(err.Error(), "client") {
 			t.Fatalf("exec error = %v, want client", err)
 		}
 	})
 
 	t.Run("secret fetch and direct exec", func(t *testing.T) {
-		newVaultClient = origClient
-		getCachedEnvSecret = func(*state.Dirs, []byte, *vlt.Client, string, string) (string, error) {
+		newVaultClientFn = origClient
+		getCachedEnvSecret = func(*state.Dirs, []byte, *vlt.Client, string, string, ...string) (string, error) {
 			return "", errors.New("secret")
 		}
 		cmd := execCmd()
@@ -451,7 +451,7 @@ func TestSyncCmdBranchesAndHelpers(t *testing.T) {
 			t.Fatal("writeFile() error = nil, want write failure")
 		}
 
-		cfg := &config.Config{Vault: config.VaultConfig{FilesPrefix: "secret/data/vsync/files"}, Files: []config.FileEntry{{Path: filepath.Join(home, "ok.txt"), Key: "ok", Mode: "0640"}, {Path: "/dev/full", Key: "fail", Mode: "0600"}}}
+		cfg := &config.Config{Vault: config.VaultConfig{VaultProfileConfig: config.VaultProfileConfig{FilesPrefix: "secret/data/vsync/files"}}, Files: []config.FileEntry{{Path: filepath.Join(home, "ok.txt"), Key: "ok", Mode: "0640"}, {Path: "/dev/full", Key: "fail", Mode: "0600"}}}
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {
 			case "/v1/secret/data/vsync/files/ok":
@@ -1072,7 +1072,7 @@ files:
 	if err != nil {
 		t.Fatal(err)
 	}
-	syncFiles(dirs, key, client, &config.Config{Vault: config.VaultConfig{FilesPrefix: "secret/data/vsync/files"}, Files: []config.FileEntry{{Path: "/dev/full", Key: "full"}}})
+	syncFiles(dirs, key, client, &config.Config{Vault: config.VaultConfig{VaultProfileConfig: config.VaultProfileConfig{FilesPrefix: "secret/data/vsync/files"}}, Files: []config.FileEntry{{Path: "/dev/full", Key: "full"}}})
 }
 
 func TestCacheCmdFilesErrorBranch(t *testing.T) {

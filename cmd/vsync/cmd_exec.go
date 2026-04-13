@@ -54,20 +54,32 @@ func execConfiguredCommand(cfg *config.Config, commandName string, commandArgs [
 	}
 
 	// Fetch secrets for each variable.
-	creds, err := loadVaultCredentials(dirs, key, resolveVaultAddr(), resolveVaultToken())
-	if err != nil {
-		return fmt.Errorf("load vault credentials: %w", err)
-	}
-	client, err := newVaultClient(creds, cfg.Vault.KVVersion)
-	if err != nil {
-		return fmt.Errorf("vault client: %w", err)
-	}
-
 	extraEnv := make(map[string]string, len(entry.Variables))
+	clients := map[string]*vlt.Client{}
 	for _, v := range entry.Variables {
-		value, err := getCachedEnvSecret(dirs, key, client, cfg.Vault.EnvPrefix, v.Key)
+		profileName := v.Profile
+		if profileName == "" {
+			profileName = "default"
+		}
+		profileCfg, err := cfg.VaultProfile(profileName)
 		if err != nil {
-			return fmt.Errorf("fetch secret %s: %w", v.Key, err)
+			return err
+		}
+		client := clients[profileName]
+		if client == nil {
+			creds, err := resolveVaultCredentialsForProfile(cfg, dirs, key, profileName)
+			if err != nil {
+				return fmt.Errorf("load vault credentials for profile %q: %w", profileName, err)
+			}
+			client, err = newVaultClientFn(creds, profileCfg.KVVersion)
+			if err != nil {
+				return fmt.Errorf("vault client for profile %q: %w", profileName, err)
+			}
+			clients[profileName] = client
+		}
+		value, err := getCachedEnvSecret(dirs, key, client, profileCfg.EnvPrefix, v.Key, profileName)
+		if err != nil {
+			return fmt.Errorf("fetch secret %s (%s): %w", v.Key, profileName, err)
 		}
 		extraEnv[v.Name] = value
 	}

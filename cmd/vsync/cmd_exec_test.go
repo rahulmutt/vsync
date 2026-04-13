@@ -100,38 +100,41 @@ func TestExecCmdInjectsConfiguredEnv(t *testing.T) {
 	flagVaultAddr = "http://addr"
 	flagVaultToken = "token"
 
-	origLoad := loadVaultCredentials
-	origClient := newVaultClient
+	origLoad := loadCredsFn
+	origClient := newVaultClientFn
 	origSecret := getCachedEnvSecret
 	origExec := execRealCommand
 	defer func() {
-		loadVaultCredentials = origLoad
-		newVaultClient = origClient
+		loadCredsFn = origLoad
+		newVaultClientFn = origClient
 		getCachedEnvSecret = origSecret
 		execRealCommand = origExec
 	}()
 
-	loadVaultCredentials = func(d *state.Dirs, k []byte, addrOverride, tokenOverride string) (*vlt.Credentials, error) {
+	loadCredsFn = func(d *state.Dirs, k []byte, addrOverride, tokenOverride string) (*vlt.Credentials, error) {
 		if d != globalDirs || !reflect.DeepEqual(k, key) {
-			t.Fatalf("loadVaultCredentials got wrong dirs or key")
+			t.Fatalf("loadCredsFn got wrong dirs or key")
 		}
 		if addrOverride != "http://addr" || tokenOverride != "token" {
 			t.Fatalf("overrides = %q/%q, want http://addr/token", addrOverride, tokenOverride)
 		}
 		return &vlt.Credentials{Addr: addrOverride, Token: tokenOverride}, nil
 	}
-	newVaultClient = func(creds *vlt.Credentials, kvVersion int) (*vlt.Client, error) {
+	newVaultClientFn = func(creds *vlt.Credentials, kvVersion int) (*vlt.Client, error) {
 		if creds.Addr != "http://addr" || creds.Token != "token" || kvVersion != 2 {
 			t.Fatalf("newVaultClient args = %#v, %d", creds, kvVersion)
 		}
 		return &vlt.Client{}, nil
 	}
-	getCachedEnvSecret = func(d *state.Dirs, k []byte, client *vlt.Client, prefix, secretKey string) (string, error) {
+	getCachedEnvSecret = func(d *state.Dirs, k []byte, client *vlt.Client, prefix, secretKey string, profile ...string) (string, error) {
 		if d != globalDirs || !reflect.DeepEqual(k, key) || client == nil {
 			t.Fatal("getCachedEnvSecret got unexpected args")
 		}
 		if prefix != "secret/data/vsync/env" {
 			t.Fatalf("prefix = %q", prefix)
+		}
+		if len(profile) != 1 || profile[0] != "default" && profile[0] != "" {
+			t.Fatalf("profile = %#v, want default/empty", profile)
 		}
 		if secretKey == "gemini-api-key" {
 			return "gemini-value", nil

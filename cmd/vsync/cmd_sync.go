@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/vsync/vsync/internal/config"
+	"github.com/vsync/vsync/internal/state"
 	vlt "github.com/vsync/vsync/internal/vault"
 )
 
@@ -34,15 +35,6 @@ func syncCmd() *cobra.Command {
 				return err
 			}
 
-			creds, err := loadCredsFn(dirs, key, resolveVaultAddr(), resolveVaultToken())
-			if err != nil {
-				return err
-			}
-			client, err := newVaultClientFn(creds, cfg.Vault.KVVersion)
-			if err != nil {
-				return err
-			}
-
 			entries := cfg.Files
 			if fileKey != "" {
 				entries = nil
@@ -56,12 +48,34 @@ func syncCmd() *cobra.Command {
 				}
 			}
 
+			credsByProfile := map[string]*vlt.Client{}
 			synced, skipped := 0, 0
 			for _, f := range entries {
+				profileName := f.Profile
+				if profileName == "" {
+					profileName = "default"
+				}
+				profileCfg, err := cfg.VaultProfile(profileName)
+				if err != nil {
+					return err
+				}
+				client := credsByProfile[profileName]
+				if client == nil {
+					creds, err := resolveVaultCredentialsForProfile(cfg, dirs, key, profileName)
+					if err != nil {
+						return fmt.Errorf("load vault credentials for profile %q: %w", profileName, err)
+					}
+					client, err = newVaultClientFn(creds, profileCfg.KVVersion)
+					if err != nil {
+						return fmt.Errorf("vault client for profile %q: %w", profileName, err)
+					}
+					credsByProfile[profileName] = client
+				}
+
 				if !force {
-					entry, _ := vlt.ReadCache(dirs, key, "files", f.Key)
+					entry, _ := vlt.ReadCache(dirs, key, "files", profileName, f.Key)
 					if entry != nil && !entry.IsExpired() {
-						fmt.Printf("  skipped (cached): %s\n", f.Key)
+						fmt.Printf("  skipped (cached): %s (%s)\n", f.Key, profileName)
 						skipped++
 						continue
 					}
@@ -69,18 +83,18 @@ func syncCmd() *cobra.Command {
 
 				var content string
 				if force {
-					result, err := client.GetFileSecret(cfg.Vault.FilesPrefix, f.Key)
+					result, err := client.GetFileSecret(profileCfg.FilesPrefix, f.Key)
 					if err != nil {
-						fmt.Fprintf(os.Stderr, "vsync: error fetching %s: %v\n", f.Key, err)
+						fmt.Fprintf(os.Stderr, "vsync: error fetching %s (%s): %v\n", f.Key, profileName, err)
 						continue
 					}
 					content = result.Value
-					_ = vlt.WriteCache(dirs, key, "files", f.Key, &vlt.CacheEntry{Value: content, VaultPath: cfg.Vault.FilesPrefix + "/" + f.Key})
+					_ = vlt.WriteCache(dirs, key, "files", profileName, f.Key, &vlt.CacheEntry{Value: content, VaultPath: profileCfg.FilesPrefix + "/" + f.Key})
 				} else {
 					var err error
-					content, err = vlt.GetCachedFileSecret(dirs, key, client, cfg.Vault.FilesPrefix, f.Key)
+					content, err = vlt.GetCachedFileSecret(dirs, key, client, profileCfg.FilesPrefix, f.Key, profileName)
 					if err != nil {
-						fmt.Fprintf(os.Stderr, "vsync: error fetching %s: %v\n", f.Key, err)
+						fmt.Fprintf(os.Stderr, "vsync: error fetching %s (%s): %v\n", f.Key, profileName, err)
 						continue
 					}
 				}
@@ -89,7 +103,7 @@ func syncCmd() *cobra.Command {
 					fmt.Fprintf(os.Stderr, "vsync: error writing %s: %v\n", f.Path, err)
 					continue
 				}
-				fmt.Printf("  synced: %s → %s\n", f.Key, f.Path)
+				fmt.Printf("  synced: %s → %s (%s)\n", f.Key, f.Path, profileName)
 				synced++
 			}
 			fmt.Printf("vsync sync: %d synced, %d skipped\n", synced, skipped)
@@ -138,20 +152,44 @@ func writeFile(path, modeStr string, content []byte) error {
 }
 
 // syncFiles is called from cmd_shell.go to sync files during shell launch.
-func syncFiles(dirs interface{ CacheFile(string, string) string }, key []byte, client *vlt.Client, cfg *config.Config) {
-	// Re-use the logic but via the vault package directly.
+func syncFiles(dirs *state.Dirs, key []byte, client *vlt.Client, cfg *config.Config) {
+	clients := map[string]*vlt.Client{}
+	if client != nil {
+		clients["default"] = client
+	}
 	for _, f := range cfg.Files {
-		content, err := vlt.GetCachedFileSecret(
-			globalDirs, key, client, cfg.Vault.FilesPrefix, f.Key,
-		)
+		profileName := f.Profile
+		if profileName == "" {
+			profileName = "default"
+		}
+		profileCfg, err := cfg.VaultProfile(profileName)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "vsync: file sync %s: %v\n", f.Key, err)
+			fmt.Fprintf(os.Stderr, "vsync: file sync %s (%s): %v\n", f.Key, profileName, err)
+			continue
+		}
+		client := clients[profileName]
+		if client == nil {
+			creds, err := resolveVaultCredentialsForProfile(cfg, dirs, key, profileName)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "vsync: file sync %s (%s): %v\n", f.Key, profileName, err)
+				continue
+			}
+			client, err = newVaultClientFn(creds, profileCfg.KVVersion)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "vsync: file sync %s (%s): %v\n", f.Key, profileName, err)
+				continue
+			}
+			clients[profileName] = client
+		}
+		content, err := vlt.GetCachedFileSecret(dirs, key, client, profileCfg.FilesPrefix, f.Key, profileName)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "vsync: file sync %s (%s): %v\n", f.Key, profileName, err)
 			continue
 		}
 		if err := writeFile(f.Path, f.Mode, []byte(content)); err != nil {
 			fmt.Fprintf(os.Stderr, "vsync: write %s: %v\n", f.Path, err)
 			continue
 		}
-		fmt.Printf("vsync: synced %s → %s\n", f.Key, f.Path)
+		fmt.Printf("vsync: synced %s → %s (%s)\n", f.Key, f.Path, profileName)
 	}
 }

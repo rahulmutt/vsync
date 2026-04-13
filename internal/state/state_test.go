@@ -33,6 +33,9 @@ func TestDefaultDirsUsesHome(t *testing.T) {
 	if got, want := dirs.TokenFile("vault_addr"), filepath.Join(wantStateBase, "tokens", "vault_addr.enc"); got != want {
 		t.Fatalf("TokenFile() = %q, want %q", got, want)
 	}
+	if got, want := dirs.ProfileTokenFile("prod", "vault_addr"), filepath.Join(wantStateBase, "tokens", "prod", "vault_addr.enc"); got != want {
+		t.Fatalf("ProfileTokenFile() = %q, want %q", got, want)
+	}
 	if got, want := dirs.CacheFile("env", "gemini"), filepath.Join(wantCacheBase, "env", "gemini.enc"); got != want {
 		t.Fatalf("CacheFile() = %q, want %q", got, want)
 	}

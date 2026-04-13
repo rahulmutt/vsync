@@ -27,7 +27,7 @@ func cacheCmd() *cobra.Command {
 				if clearFiles {
 					kind = "files"
 				}
-				if err := vlt.DeleteCache(dirs, kind, clearKey); err != nil {
+				if err := vlt.DeleteCacheAllProfiles(dirs, kind, clearKey); err != nil {
 					return err
 				}
 				fmt.Printf("vsync: cleared cache entry %s/%s\n", kind, clearKey)

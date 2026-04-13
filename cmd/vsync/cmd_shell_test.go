@@ -154,7 +154,7 @@ func TestShellCmdUsesShellEnvAndFallback(t *testing.T) {
 	ensureShimsFn = func(*state.Dirs, []string) error { return nil }
 	loadCredsFn = func(*state.Dirs, []byte, string, string) (*vlt.Credentials, error) { return &vlt.Credentials{}, nil }
 	newVaultClientFn = func(*vlt.Credentials, int) (*vlt.Client, error) { return &vlt.Client{}, nil }
-	syncFilesFn = func(interface{ CacheFile(string, string) string }, []byte, *vlt.Client, *config.Config) {}
+	syncFilesFn = func(*state.Dirs, []byte, *vlt.Client, *config.Config) {}
 
 	cases := []struct {
 		name     string

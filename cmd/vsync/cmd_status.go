@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/vsync/vsync/internal/config"
 	"github.com/vsync/vsync/internal/shim"
 	vlt "github.com/vsync/vsync/internal/vault"
 )
@@ -29,33 +30,6 @@ func statusCmd() *cobra.Command {
 			printField("Key file", keyPath)
 			printField("Cache dir", dirs.Cache)
 
-			// Vault address.
-			creds, err := loadCredsFn(dirs, key, resolveVaultAddr(), resolveVaultToken())
-			if err != nil {
-				fmt.Printf("  %-20s %s\n", "Credentials:", "NOT FOUND (run 'vsync init')")
-			} else {
-				truncAddr := creds.Addr
-				if len(truncAddr) > 40 {
-					truncAddr = truncAddr[:40] + "…"
-				}
-				printField("Vault address", truncAddr)
-
-				// Token TTL.
-				client, cerr := newVaultClientFn(creds, 2)
-				if cerr == nil {
-					ttl, terr := client.TokenTTL()
-					if terr == nil {
-						if ttl == 0 {
-							printField("Token TTL", "unlimited")
-						} else {
-							printField("Token TTL", ttl.Round(time.Second).String())
-						}
-					} else {
-						printField("Token TTL", fmt.Sprintf("error: %v", terr))
-					}
-				}
-			}
-
 			// Config.
 			globalCfgPath, _ := resolveGlobalConfigPath()
 			overrideCfgPath, _ := resolveConfigPath()
@@ -69,6 +43,39 @@ func statusCmd() *cobra.Command {
 			if cfgErr != nil {
 				fmt.Printf("  %-20s %v\n", "Config error:", cfgErr)
 			} else {
+				// Vault address / token TTL for the default profile.
+				defaultCreds, err := resolveVaultCredentialsForProfile(cfg, dirs, key, "default")
+				if err != nil {
+					fmt.Printf("  %-20s %s\n", "Credentials:", "NOT FOUND (run 'vsync init')")
+				} else {
+					truncAddr := defaultCreds.Addr
+					if len(truncAddr) > 40 {
+						truncAddr = truncAddr[:40] + "…"
+					}
+					printField("Vault address", truncAddr)
+
+					// Token TTL.
+					client, cerr := newVaultClientFn(defaultCreds, cfg.Vault.KVVersion)
+					if cerr == nil {
+						ttl, terr := client.TokenTTL()
+						if terr == nil {
+							if ttl == 0 {
+								printField("Token TTL", "unlimited")
+							} else {
+								printField("Token TTL", ttl.Round(time.Second).String())
+							}
+						} else {
+							printField("Token TTL", fmt.Sprintf("error: %v", terr))
+						}
+					}
+				}
+
+				fmt.Printf("\nVault profiles:\n")
+				fmt.Printf("  %-20s %s\n", "default", profileSummary(cfg.Vault.VaultProfileConfig))
+				for name, prof := range cfg.Vault.Profiles {
+					fmt.Printf("  %-20s %s\n", name, profileSummary(prof))
+				}
+
 				fmt.Printf("\nConfigured commands (%d):\n", len(cfg.Env.Commands))
 				shimNames, _ := shim.List(dirs)
 				shimSet := toSet(shimNames)
@@ -79,7 +86,11 @@ func statusCmd() *cobra.Command {
 					}
 					fmt.Printf("  %-20s %s\n", c.Name, shimStatus)
 					for _, v := range c.Variables {
-						cacheEntry, _ := vlt.ReadCache(dirs, key, "env", v.Key)
+						profileName := v.Profile
+						if profileName == "" {
+							profileName = "default"
+						}
+						cacheEntry, _ := vlt.ReadCache(dirs, key, "env", profileName, v.Key)
 						cacheStatus := "not cached"
 						if cacheEntry != nil {
 							if cacheEntry.IsExpired() {
@@ -91,13 +102,17 @@ func statusCmd() *cobra.Command {
 								cacheStatus = fmt.Sprintf("cached (expires in %s)", remaining)
 							}
 						}
-						fmt.Printf("    %s = %s [%s]\n", v.Name, v.Key, cacheStatus)
+						fmt.Printf("    %s = %s [%s, profile=%s]\n", v.Name, v.Key, cacheStatus, profileName)
 					}
 				}
 
 				fmt.Printf("\nFile sync entries (%d):\n", len(cfg.Files))
 				for _, f := range cfg.Files {
-					cacheEntry, _ := vlt.ReadCache(dirs, key, "files", f.Key)
+					profileName := f.Profile
+					if profileName == "" {
+						profileName = "default"
+					}
+					cacheEntry, _ := vlt.ReadCache(dirs, key, "files", profileName, f.Key)
 					cacheStatus := "not cached"
 					if cacheEntry != nil {
 						if cacheEntry.IsExpired() {
@@ -111,7 +126,7 @@ func statusCmd() *cobra.Command {
 					if errors.Is(statErr, os.ErrNotExist) {
 						fileStatus = "missing"
 					}
-					fmt.Printf("  %-30s → %-40s [%s, %s]\n", f.Key, f.Path, fileStatus, cacheStatus)
+					fmt.Printf("  %-30s → %-40s [%s, %s, profile=%s]\n", f.Key, f.Path, fileStatus, cacheStatus, profileName)
 				}
 			}
 
@@ -130,4 +145,15 @@ func toSet(items []string) map[string]bool {
 		m[s] = true
 	}
 	return m
+}
+
+func profileSummary(prof config.VaultProfileConfig) string {
+	addr := prof.Addr
+	if len(addr) > 40 {
+		addr = addr[:40] + "…"
+	}
+	if addr == "" {
+		addr = "(credentials not configured)"
+	}
+	return fmt.Sprintf("addr=%s env=%s files=%s kv=%d", addr, prof.EnvPrefix, prof.FilesPrefix, prof.KVVersion)
 }

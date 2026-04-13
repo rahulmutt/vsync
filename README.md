@@ -1,194 +1,158 @@
 # vsync
 
 `vsync` gives you a secure, Vault-integrated shell environment.
-Run `vsync shell` once and every command you've configured automatically receives its
-secrets from HashiCorp Vault — no `.env` files, no copy-pasted tokens, no secrets in your
-shell history.
+It stores Vault credentials encrypted on disk, launches a shell with command shims, and fetches secrets at exec-time.
 
-```
-$ vsync shell
-vsync: synced pi-agent-auth → ~/.pi/agent/auth.json
-vsync: launching /bin/zsh with 2 shim(s)
+## Highlights
 
-$ pi chat "hello"          # GEMINI_API_KEY injected transparently
-$ aws s3 ls                # AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY injected transparently
-```
+- multiple Vault profiles with independent addresses, tokens, prefixes, and KV versions
+- per-secret `profile:` selection in config
+- encrypted on-disk cache with Vault TTL awareness
+- automatic file syncing on shell entry
+- shimmed commands that inject environment variables only when needed
 
 ---
 
 ## How it works
 
-1. **`vsync init`** stores your Vault address and token encrypted on disk using a
-   randomly-generated AES-256 key that never leaves your machine.
-2. **`vsync shell`** opens a new shell where a shim directory is prepended to your
-   `PATH`. Each shim is a tiny wrapper script for a command you've configured.
-3. When you run a shimmed command (e.g. `pi`), the shim calls `vsync exec pi`, which
-   fetches the required secrets from Vault, injects them as environment variables, and
-   immediately `exec`s the real binary — the secrets exist only in the child process's
-   environment and are never written to disk in plain text.
-4. Secrets are **cached encrypted on disk**, so subsequent invocations are instant and
-   the tool keeps working even when Vault is temporarily unreachable.
+1. `vsync init` creates or loads the local encryption key and stores Vault credentials encrypted on disk.
+2. `vsync shell` prepends a shim directory to `PATH` and launches a new shell.
+3. Running a shimmed command (for example `pi`) calls `vsync exec pi`.
+4. `vsync exec` resolves the configured Vault profile, fetches the secret, injects the environment variable, and `exec`s the real binary.
+5. `vsync sync` pulls file secrets from Vault and writes them to their configured paths.
+6. Secrets are cached encrypted on disk so repeated use stays fast and Vault outages can fall back to cached values.
 
 ---
 
 ## Requirements
 
-- A running [HashiCorp Vault](https://developer.hashicorp.com/vault) instance
-- A Vault token with read access to the relevant KV paths
-- [mise](https://mise.jdx.dev/) (to build from source) — or just copy a pre-built binary
-
----
-
-## Installation
-
-### Build from source
-
-```sh
-git clone https://github.com/vsync/vsync
-cd vsync
-mise install     # pins and installs Go 1.26
-mise run build   # produces dist/vsync
-cp dist/vsync /usr/local/bin/vsync
-```
-
-### Verify
-
-```sh
-vsync --help
-```
+- HashiCorp Vault
+- a Vault token with read access to the configured KV paths
+- `mise` if you want to build from source
 
 ---
 
 ## Quick start
 
-### 1. Write a config file
+### 1. Create a config file
 
-```sh
-mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/vsync"
-```
-
-`${XDG_CONFIG_HOME:-$HOME/.config}/vsync/config.yaml`:
+`~/.config/vsync/config.yaml`:
 
 ```yaml
+vault:
+  env_prefix: "secret/data/vsync/env"
+  files_prefix: "secret/data/vsync/files"
+  kv_version: 2
+  profiles:
+    prod:
+      addr: "https://vault.prod.example.com"
+      token: "hvs.prod-token"
+      env_prefix: "secret/data/prod/env"
+      files_prefix: "secret/data/prod/files"
+      kv_version: 2
+
 env:
   commands:
     - name: pi
       variables:
         - name: GEMINI_API_KEY
           key: gemini-api-key
-
-    - name: aws
-      variables:
-        - name: AWS_ACCESS_KEY_ID
-          key: aws-access-key-id
-        - name: AWS_SECRET_ACCESS_KEY
-          key: aws-secret-access-key
+          profile: prod
+        - name: OPENAI_API_KEY
+          key: openai-api-key
 
 files:
   - path: ~/.pi/agent/auth.json
     key: pi-agent-auth
+    profile: prod
 ```
 
 ### 2. Store the matching secrets in Vault
 
 ```sh
-# Env secrets — stored at secret/data/vsync/env/<key>
-vault kv put secret/vsync/env/gemini-api-key    value="sk-..."
-vault kv put secret/vsync/env/aws-access-key-id value="AKIA..."
-vault kv put secret/vsync/env/aws-secret-access-key value="..."
-
-# File secrets — stored at secret/data/vsync/files/<key>
-vault kv put secret/vsync/files/pi-agent-auth content='{"token":"..."}'
+vault kv put secret/vsync/env/openai-api-key value="sk-..."
+vault kv put secret/prod/env/gemini-api-key value="sk-prod-..."
+vault kv put secret/prod/files/pi-agent-auth content='{"token":"..."}'
 ```
-
-> See [Vault secret layout](#vault-secret-layout) for the exact path format and field names.
 
 ### 3. Initialise vsync
 
 ```sh
 vsync init
-# Vault address (VAULT_ADDR): https://vault.example.com
-# Vault token (VAULT_TOKEN): ••••••••
-# vsync: verifying vault connectivity… ✓
-# vsync: credentials stored at <state dir>/tokens
-# vsync: cache stored at       <cache dir>
-# vsync: encryption key at     <state dir>/keys/default.key
 ```
 
-You can also pass credentials as flags or environment variables to skip the prompts:
+`vsync init` loads the config, prompts for any missing credentials, and stores each profile encrypted on disk.
+If you provide `VAULT_ADDR` / `VAULT_TOKEN` or the matching flags, they apply to the default profile.
 
-```sh
-VAULT_ADDR=https://vault.example.com VAULT_TOKEN=hvs.xxx vsync init
-vsync init --vault-addr https://vault.example.com --vault-token hvs.xxx
-```
-
-If you want vsync to store its state somewhere other than the default, set
-`VSYNC_STATE_DIR` for a full override or `XDG_STATE_HOME` to use `$XDG_STATE_HOME/vsync`
-before running `vsync init`. To move only the cache, set `VSYNC_CACHE_DIR` or
-`XDG_CACHE_HOME` before running `vsync init`.
-
-### 4. Enter the vsync shell
+### 4. Enter the shell
 
 ```sh
 vsync shell
 ```
 
-That's it. From this shell, every configured command automatically gets its secrets.
+From this shell, configured commands automatically receive their secrets.
 
 ---
 
 ## Configuration reference
 
-**Global location:** `$XDG_CONFIG_HOME/vsync/config.yaml` (or `~/.config/vsync/config.yaml` if `XDG_CONFIG_HOME` is unset).  
-Override with `--global-config <path>` or `VSYNC_GLOBAL_CONFIG=<path>`.
+Global config path:
 
-`--config <path>` or `VSYNC_CONFIG=<path>` point to a local override config. If not set, `vsync` searches for `vsync.yaml` in the current directory and every parent directory. Any override is merged on top of the global config from top to bottom, so the closest local config wins for overlapping settings. Entries are merged by identity: commands by `name`, command variables by variable `name`, and file sync entries by `key`.
+- `$XDG_CONFIG_HOME/vsync/config.yaml`
+- or `~/.config/vsync/config.yaml`
+
+`--config` / `VSYNC_CONFIG` point to a local override file. If omitted, `vsync` searches for `vsync.yaml` in the current directory and parent directories. Configs are merged from root-most to leaf-most.
+
+### Config shape
 
 ```yaml
-# Optional vault settings (these are the defaults)
 vault:
-  env_prefix:   "secret/data/vsync/env"    # KV path prefix for env secrets
-  files_prefix: "secret/data/vsync/files"  # KV path prefix for file secrets
-  kv_version:   2                           # 1 or 2
+  addr: "http://127.0.0.1:8200"            # default profile bootstrap value
+  token: "hvs.default-token"               # default profile bootstrap value
+  env_prefix: "secret/data/vsync/env"
+  files_prefix: "secret/data/vsync/files"
+  kv_version: 2
+  profiles:
+    prod:
+      addr: "https://vault.prod.example.com"
+      token: "hvs.prod-token"
+      env_prefix: "secret/data/prod/env"
+      files_prefix: "secret/data/prod/files"
+      kv_version: 2
 
-# Commands to shim and the env vars each one needs
 env:
   commands:
-    - name: pi                    # exact binary name to intercept
+    - name: pi
       variables:
-        - name: GEMINI_API_KEY    # environment variable set in the child process
-          key: gemini-api-key     # vault key appended to env_prefix
+        - name: GEMINI_API_KEY
+          key: gemini-api-key
+          profile: prod
+        - name: ANTHROPIC_API_KEY
+          key: anthropic-api-key
 
-    - name: aws
-      variables:
-        - name: AWS_ACCESS_KEY_ID
-          key: aws-access-key-id
-        - name: AWS_SECRET_ACCESS_KEY
-          key: aws-secret-access-key
-
-# Files synced from Vault on shell entry and via `vsync sync`
 files:
-  - path: ~/.pi/agent/auth.json   # destination on disk (~ is expanded)
-    key: pi-agent-auth            # vault key appended to files_prefix
-    mode: "0600"                  # optional permission (default: 0600)
+  - path: ~/.pi/agent/auth.json
+    key: pi-agent-auth
+    profile: prod
+    mode: "0600"
 ```
 
-### Vault secret layout
+### Profile rules
 
-| Config entry | Vault path | Expected field |
-|---|---|---|
-| `env.commands[*].variables[*].key: gemini-api-key` | `secret/data/vsync/env/gemini-api-key` | `value` |
-| `files[*].key: pi-agent-auth` | `secret/data/vsync/files/pi-agent-auth` | `content` |
+- The top-level `vault:` block is the default profile.
+- Additional profiles live under `vault.profiles`.
+- Each secret reference can set `profile: <name>`.
+- If `profile` is omitted, the default profile is used.
+- `env_prefix`, `files_prefix`, and `kv_version` default per profile if omitted.
 
-**Env secrets** must have a `value` field:
-```sh
-vault kv put secret/vsync/env/gemini-api-key value="sk-abc123"
-```
+### Vault paths
 
-**File secrets** must have a `content` field:
-```sh
-vault kv put secret/vsync/files/pi-agent-auth content='{"auth":"..."}'
-```
+The vault path is built as:
+
+- env secrets: `<env_prefix>/<key>`
+- file secrets: `<files_prefix>/<key>`
+
+The profile only decides which prefix / credentials to use.
 
 ---
 
@@ -196,291 +160,147 @@ vault kv put secret/vsync/files/pi-agent-auth content='{"auth":"..."}'
 
 ### `vsync init`
 
-Store Vault credentials encrypted on disk. Run once, or again after rotating your token.
+Stores Vault credentials encrypted on disk and generates the encryption key.
 
-```
+```sh
 vsync init [--vault-addr ADDR] [--vault-token TOKEN] [--rotate-key]
 ```
 
-| Flag | Description |
-|------|-------------|
-| `--vault-addr` | Vault server address (overrides `VAULT_ADDR`) |
-| `--vault-token` | Vault token (overrides `VAULT_TOKEN`) |
-| `--rotate-key` | Generate a fresh encryption key and re-encrypt stored credentials |
-
-`init` will prompt interactively for any values not provided via flag or environment
-variable. The token prompt does not echo characters when run in a real terminal.
-
-After storing credentials it immediately verifies connectivity and warns you if the token
-has less than an hour remaining.
-
----
+- The default profile uses flags, environment variables, config values, any already stored credentials, and prompts.
+- Additional profiles use config values, any already stored credentials, and prompts.
+- The command verifies each profile with Vault and warns on short token TTLs.
 
 ### `vsync shell`
 
-Launch a new interactive shell with the vsync environment active.
+Launches a new interactive shell with shims active.
 
-```
+```sh
 vsync shell [--shell /bin/zsh]
 ```
 
-What happens when you run it:
+It syncs files, writes shims, then execs into the shell with `PATH` prefixed by the shim directory.
 
-1. `vsync` loads the global config file and then merges any local override config (`--config`, `VSYNC_CONFIG`, or searched `vsync.yaml` files in the current directory and parent directories).
-2. Configured files are synced from Vault to their local paths.
-3. Shim scripts are written (or refreshed) for every configured command.
-4. A new shell is started with:
-   - The shim directory prepended to `PATH`
-   - `VSYNC_ACTIVE=1` (prevents accidental nesting)
-   - `VSYNC_KEY` set to the encryption key file path
+### `vsync exec <command> [args...]`
 
-Running `vsync shell` inside an existing vsync shell is blocked — you'll see an error
-instead of ending up with a broken nested environment.
+Internal entry-point used by shims.
 
----
+- resolves the configured command
+- chooses the profile for each variable
+- reads the encrypted cache or fetches from Vault
+- execs the real binary with the fetched environment variables
 
 ### `vsync sync`
 
-Manually pull file secrets from Vault to their local paths.
-
-```
-vsync sync [--file <key>] [--force]
-```
-
-| Flag | Description |
-|------|-------------|
-| `--file <key>` | Sync only the entry whose vault key matches `<key>` |
-| `--force` | Re-fetch even if the cache is still fresh |
+Manually syncs file secrets to local paths.
 
 ```sh
-vsync sync                      # sync all files
-vsync sync --file pi-agent-auth # sync one file
-vsync sync --force              # bypass cache, re-fetch everything
+vsync sync
+vsync sync --file pi-agent-auth
+vsync sync --force
 ```
-
----
 
 ### `vsync status`
 
-Show the current state of vsync: key file, cache directory, vault connectivity,
-token TTL, shim presence, and cache expiry for every configured secret.
-
-```
-vsync status
-```
-
-Example output:
-
-```
-=== vsync status ===
-  Key file:            <state dir>/keys/default.key
-  Cache dir:           ~/.cache/vsync
-  Vault address:       https://vault.example.com
-  Token TTL:           11h59m42s
-  Global config:       $XDG_CONFIG_HOME/vsync/config.yaml
-  Override config:     search vsync.yaml in cwd/parents
-
-Configured commands (2):
-  pi                    (shim present)
-    GEMINI_API_KEY = gemini-api-key [cached (expires in 11h59m32s)]
-  aws                   (shim present)
-    AWS_ACCESS_KEY_ID = aws-access-key-id [not cached]
-    AWS_SECRET_ACCESS_KEY = aws-secret-access-key [not cached]
-
-File sync entries (1):
-  pi-agent-auth   → ~/.pi/agent/auth.json   [exists, cached]
-```
-
----
+Shows:
+- key file path and existence
+- default-profile Vault address and token TTL
+- configured profiles
+- command and file cache status
+- shim presence
 
 ### `vsync cache clear`
-
-Remove cached secrets from the resolved cache directory to force a fresh fetch from Vault on the next use.
-
-```
-vsync cache clear [--all] [--env] [--files] [--key <name>]
-```
-
-| Flag | What gets cleared |
-|------|-------------------|
-| `--all` | Every cached secret (env + files) |
-| `--env` | All cached env-variable secrets |
-| `--files` | All cached file secrets |
-| `--key <name>` | One specific entry by vault key name |
 
 ```sh
 vsync cache clear --all
 vsync cache clear --env
+vsync cache clear --files
 vsync cache clear --key gemini-api-key
-vsync cache clear --files --key pi-agent-auth
-
-# With a custom cache directory
-VSYNC_CACHE_DIR=/tmp/vsync-cache vsync cache clear --env
 ```
+
+This clears cache entries for the default profile and any profile-specific cache directories.
 
 ---
 
-## Global flags
+## Storage layout
 
-These flags work with every command.
-
-| Flag | Environment variable | Description |
-|------|---------------------|-------------|
-| `--vault-addr` | `VAULT_ADDR` | Vault server address |
-| `--vault-token` | `VAULT_TOKEN` | Vault token |
-| `--vault-env-prefix` | `VSYNC_VAULT_ENV_PREFIX` | Vault prefix for env secrets (`vault.env_prefix`) |
-| `--vault-files-prefix` | `VSYNC_VAULT_FILES_PREFIX` | Vault prefix for file secrets (`vault.files_prefix`) |
-| `--vault-kv-version` | `VSYNC_VAULT_KV_VERSION` | Vault KV version (`vault.kv_version`, 1 or 2) |
-| `--global-config` | `VSYNC_GLOBAL_CONFIG` | Global config file path |
-| `--config` | `VSYNC_CONFIG` | Local override config path |
-| `--key` | `VSYNC_KEY` | Encryption key file path (defaults to `<state dir>/keys/default.key`) |
-
-Flags take precedence over environment variables, which take precedence over the
-values stored in `config.yaml`, and then over the encrypted values stored by `vsync init`.
-
-Example:
-
-```sh
-vsync shell \
-  --vault-env-prefix secret/data/team/env \
-  --vault-files-prefix secret/data/team/files \
-  --vault-kv-version 2
-```
-
----
-
-## Where things are stored
-
-vsync keeps its long-lived state and its secret cache in separate locations.
-
-The **state directory** is resolved in this order:
-1. `VSYNC_STATE_DIR` if set (full override)
-2. `XDG_STATE_HOME/vsync` if `XDG_STATE_HOME` is set
-3. `~/.local/state/vsync` as the fallback
-
-The **cache directory** is resolved independently:
-1. `VSYNC_CACHE_DIR` if set (full override)
-2. `XDG_CACHE_HOME/vsync` if `XDG_CACHE_HOME` is set
-3. `~/.cache/vsync` as the fallback
-
-```
-${XDG_CONFIG_HOME:-$HOME/.config}/vsync/
-  config.yaml                          ← global configuration
+```text
+${XDG_CONFIG_HOME:-$HOME/.config}/vsync/config.yaml
 
 <state dir>/
-  keys/
-    default.key                        ← 32-byte AES-256 key (never leaves disk)
-  tokens/
-    vault_addr.enc                     ← encrypted Vault address
-    vault_token.enc                    ← encrypted Vault token
-  shims/
-    <command>                          ← one tiny shell script per configured command
+  keys/default.key
+  tokens/vault_addr.enc
+  tokens/vault_token.enc
+  tokens/<profile>/vault_addr.enc
+  tokens/<profile>/vault_token.enc
+  shims/<command>
 
 <cache dir>/
-  env/<key>.enc                        ← cached env secrets with expiry
-  files/<key>.enc                      ← cached file secrets with expiry
+  env/<key>.enc
+  env/<profile>/<key>.enc
+  files/<key>.enc
+  files/<profile>/<key>.enc
 ```
 
-All `.enc` files are AES-256-GCM encrypted binary blobs (nonce + ciphertext). All files
-are created with permissions `0600`; directories with `0700`.
+State defaults to `~/.local/state/vsync`; cache defaults to `~/.cache/vsync`.
 
 ---
 
-## Caching behaviour
+## Caching
 
 vsync caches secrets encrypted on disk so that:
 
-- **Repeated calls are fast.** Running `pi` fifty times in a session means one Vault
-  round-trip, not fifty.
-- **Offline work keeps working.** If Vault is unreachable but a cached value exists (even
-  if expired), vsync uses the stale cache and prints a warning to stderr rather than
-  blocking your work.
+- repeated commands are fast,
+- Vault outages can fall back to cached values,
+- TTL expiry is respected using Vault lease duration minus a small safety margin.
 
-Cache lifetime comes from the Vault lease duration of each secret minus a 10-second
-safety margin. Secrets with `lease_duration: 0` (e.g. root tokens, static secrets with
-no TTL) are cached indefinitely until you clear them manually.
-
-Use `vsync status` to see expiry times and `vsync cache clear` to invalidate entries.
+If Vault is unavailable and a cached value exists, vsync warns and uses the cache.
 
 ---
 
 ## Security notes
 
-- **The key never leaves disk.** The 32-byte AES key lives only in the resolved state
-  directory (`<state dir>/keys/default.key`) and in process memory while vsync is running.
-  It is never exported as an environment variable.
-- **Credentials are decrypted on demand.** The Vault token is decrypted when needed and
-  not retained in memory beyond the operation that required it.
-- **Secrets are never logged.** `vsync exec` does not print secret values to stdout or
-  stderr under any circumstances.
-- **Shims are transparent.** The shimmed shell environment is otherwise identical to your
-  normal shell — only the targeted binaries receive injected secrets.
-- **File permissions are enforced.** All secrets files are `0600`; directories are `0700`.
-  Writes go through a temp-file-then-rename sequence to be atomic.
+- The encryption key never leaves disk except in memory while vsync is running.
+- Vault tokens are decrypted only when needed.
+- Secret values are never printed.
+- Key/token/cache files are `0600`; directories are `0700`; shims are `0755`.
+- Atomic writes are used for secret material.
+
+---
+
+## Building from source
+
+```sh
+mise install
+mise run build
+mise run test
+```
+
+`mise.toml` owns the pinned Go toolchain and build/test tasks.
 
 ---
 
 ## Troubleshooting
 
-### `vsync: vault credentials not found; run 'vsync init' first`
+### `vsync: vault credentials for profile "..." not found; run 'vsync init' first`
 
-You haven't run `vsync init` yet, or you're pointing at a different state directory.
-Run `vsync init` and follow the prompts.
+Run `vsync init` again. Make sure you're using the same state directory and config file that defined the profile.
 
-### Vault is unreachable but I need to work now
+### `vsync: already inside a vsync shell; nested shells are not supported`
 
-vsync will automatically fall back to cached values and print a warning:
+Exit the current vsync shell before running `vsync shell` again.
 
-```
-vsync: vault unavailable, using stale cache for gemini-api-key
-```
+### A shimmed command is using the wrong binary
 
-If there's no cache entry yet, you'll need Vault connectivity for the first fetch.
+Make sure the real binary appears later in `PATH` than the shim directory.
 
-### My token expired and now nothing works
+---
 
-Run `vsync init` again with your new token:
+## Example release/build flow
 
 ```sh
-vsync init --vault-token hvs.newtoken
+mise install
+mise run build
+mise run test
 ```
 
-Your existing encryption key is reused; only the stored token is updated.
-
-### I need to rotate the encryption key
-
-```sh
-vsync init --rotate-key
-```
-
-This generates a new 32-byte key and re-encrypts the stored Vault credentials under it.
-Cached secrets will be unreadable after rotation; they'll be re-fetched automatically on
-next use.
-
-### A shimmed command isn't picking up the right binary
-
-Make sure the real binary is somewhere later in `PATH` than the shim directory
-(`<state dir>/shims` after resolution). Check with:
-
-```sh
-which -a pi     # should show the shim first, real binary second
-```
-
-### I accidentally ran `vsync shell` inside a vsync shell
-
-vsync detects the `VSYNC_ACTIVE=1` environment variable and refuses to nest:
-
-```
-vsync: already inside a vsync shell; nested shells are not supported
-```
-
-Exit the current shell first, then re-enter with `vsync shell`.
-
-### Check overall health
-
-```sh
-vsync status
-```
-
-This shows key file existence, Vault connectivity, token TTL, shim presence, and cache
-state in one view.
+That is usually all you need for local development.

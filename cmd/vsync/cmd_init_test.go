@@ -47,6 +47,7 @@ func setupInitTest(t *testing.T) (*state.Dirs, string) {
 		loadOrGenerateKeyFn = crypto.LoadOrGenerateKey
 		loadKeyFn = crypto.LoadKey
 		storeCredentialsFn = vlt.StoreCredentials
+		storeProfileCredsFn = vlt.StoreCredentialsForProfile
 		newClientFn = vlt.NewClient
 		resolveVaultAddrFn = resolveVaultAddr
 		resolveVaultTokenFn = resolveVaultToken
@@ -129,6 +130,62 @@ func TestInitCmdStoresCredentialsAndUsesProvidedEnv(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "cache stored at") {
 		t.Fatalf("init output missing cache dir line:\n%s", stdout.String())
+	}
+}
+
+func TestInitCmdStoresMultipleProfiles(t *testing.T) {
+	dirs, home := setupInitTest(t)
+	keyPath := filepath.Join(home, "multi.key")
+	flagKeyPath = keyPath
+	flagVaultAddr = "http://127.0.0.1:8200"
+	flagVaultToken = "default-token"
+
+	cfgDir := filepath.Join(home, ".config", "vsync")
+	if err := os.MkdirAll(cfgDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := filepath.Join(cfgDir, "config.yaml")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/auth/token/lookup-self" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"auth":{"lease_duration":1800}}`))
+	}))
+	defer server.Close()
+	if err := os.WriteFile(cfgPath, []byte("vault:\n  profiles:\n    prod:\n      addr: "+server.URL+"\n      token: prod-token\n      env_prefix: prod/env\n      files_prefix: prod/files\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	flagVaultAddr = server.URL
+
+	cmd := initCmd()
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("initCmd() error = %v", err)
+	}
+
+	key, err := crypto.LoadKey(keyPath)
+	if err != nil {
+		t.Fatalf("LoadKey() error = %v", err)
+	}
+	defaultCreds, err := vlt.LoadCredentials(dirs, key, "", "")
+	if err != nil {
+		t.Fatalf("LoadCredentials(default) error = %v", err)
+	}
+	if defaultCreds.Addr != server.URL || defaultCreds.Token != "default-token" {
+		t.Fatalf("default creds = %#v", defaultCreds)
+	}
+	prodCreds, err := vlt.LoadCredentialsForProfile(dirs, key, "prod", "", "")
+	if err != nil {
+		t.Fatalf("LoadCredentialsForProfile(prod) error = %v", err)
+	}
+	if prodCreds.Addr != server.URL || prodCreds.Token != "prod-token" {
+		t.Fatalf("prod creds = %#v", prodCreds)
+	}
+	if _, err := os.Stat(dirs.ProfileTokenFile("prod", "vault_addr")); err != nil {
+		t.Fatalf("profile addr file missing: %v", err)
 	}
 }
 

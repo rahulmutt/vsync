@@ -151,6 +151,17 @@ func TestLoadAndStoreCredentials(t *testing.T) {
 	if creds.Addr != "http://vault:8200" || creds.Token != "tok" {
 		t.Fatalf("LoadCredentials() = %#v", creds)
 	}
+
+	if err := StoreCredentialsForProfile(dirs, key, "prod", "http://prod:8200", "prod-token"); err != nil {
+		t.Fatalf("StoreCredentialsForProfile() error = %v", err)
+	}
+	prod, err := LoadCredentialsForProfile(dirs, key, "prod", "", "")
+	if err != nil {
+		t.Fatalf("LoadCredentialsForProfile() error = %v", err)
+	}
+	if prod.Addr != "http://prod:8200" || prod.Token != "prod-token" {
+		t.Fatalf("LoadCredentialsForProfile() = %#v", prod)
+	}
 }
 
 func TestCachedSecretsUseFreshCacheAndFallbackOnVaultError(t *testing.T) {

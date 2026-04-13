@@ -9,6 +9,7 @@ import (
 	"github.com/vsync/vsync/internal/config"
 	"github.com/vsync/vsync/internal/crypto"
 	"github.com/vsync/vsync/internal/state"
+	vlt "github.com/vsync/vsync/internal/vault"
 )
 
 var (
@@ -21,6 +22,8 @@ var (
 	flagConfigPath       string
 	flagKeyPath          string
 )
+
+const defaultVaultProfileName = "default"
 
 var userHomeDirFn = os.UserHomeDir
 var exitFn = os.Exit
@@ -190,6 +193,31 @@ func applyVaultOverrides(cfg *config.Config) error {
 		cfg.Vault.KVVersion = v
 	}
 	return nil
+}
+
+func resolveVaultCredentialsForProfile(cfg *config.Config, dirs *state.Dirs, key []byte, profile string) (*vlt.Credentials, error) {
+	prof, err := cfg.VaultProfile(profile)
+	if err != nil {
+		return nil, err
+	}
+	if profile == "" || profile == defaultVaultProfileName {
+		addrOverride := resolveVaultAddr()
+		if addrOverride == "" {
+			addrOverride = prof.Addr
+		}
+		tokenOverride := resolveVaultToken()
+		if tokenOverride == "" {
+			tokenOverride = prof.Token
+		}
+		return loadCredsFn(dirs, key, addrOverride, tokenOverride)
+	}
+	if creds, err := loadProfileCredsFn(dirs, key, profile); err == nil {
+		return creds, nil
+	}
+	if prof.Addr != "" && prof.Token != "" {
+		return &vlt.Credentials{Addr: prof.Addr, Token: prof.Token}, nil
+	}
+	return nil, fmt.Errorf("vault credentials for profile %q not found; run 'vsync init' first", profile)
 }
 
 func loadConfigWithOverrides(globalPath, overridePath string) (*config.Config, error) {

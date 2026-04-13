@@ -307,7 +307,7 @@ func TestConfigPathsAndMergeConfigCoverage(t *testing.T) {
 		t.Fatalf("configPaths() stat error = %v, want stat fail", err)
 	}
 
-	cfg := &Config{Vault: VaultConfig{EnvPrefix: "keep"}}
+	cfg := &Config{Vault: VaultConfig{VaultProfileConfig: VaultProfileConfig{EnvPrefix: "keep"}}}
 	mergeConfig(cfg, nil)
 	if got, want := cfg.Vault.EnvPrefix, "keep"; got != want {
 		t.Fatalf("mergeConfig(nil) mutated config: %q", got)
@@ -430,6 +430,67 @@ func TestFindCommand(t *testing.T) {
 	}
 	if got := cfg.FindCommand("missing"); got != nil {
 		t.Fatalf("FindCommand(missing) = %#v, want nil", got)
+	}
+}
+
+func TestLoadSupportsProfilesAndReferenceProfiles(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`vault:
+  addr: http://default:8200
+  token: default-token
+  env_prefix: default/env
+  files_prefix: default/files
+  kv_version: 1
+  profiles:
+    prod:
+      addr: http://prod:8200
+      token: prod-token
+      env_prefix: prod/env
+      files_prefix: prod/files
+      kv_version: 2
+env:
+  commands:
+    - name: pi
+      variables:
+        - name: GEMINI_API_KEY
+          key: gemini
+          profile: prod
+files:
+  - path: ~/prod.json
+    key: prod-file
+    profile: prod
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got, want := cfg.Vault.Addr, "http://default:8200"; got != want {
+		t.Fatalf("default addr = %q, want %q", got, want)
+	}
+	if got, want := cfg.Vault.Profiles["prod"].KVVersion, 2; got != want {
+		t.Fatalf("prod kv_version = %d, want %d", got, want)
+	}
+	if got, want := cfg.Vault.Profiles["prod"].EnvPrefix, "prod/env"; got != want {
+		t.Fatalf("prod env_prefix = %q, want %q", got, want)
+	}
+	pi := cfg.FindCommand("pi")
+	if pi == nil {
+		t.Fatal("FindCommand(pi) = nil")
+	}
+	if got, want := pi.Variables[0].Profile, "prod"; got != want {
+		t.Fatalf("variable profile = %q, want %q", got, want)
+	}
+	if got, want := cfg.Files[0].Profile, "prod"; got != want {
+		t.Fatalf("file profile = %q, want %q", got, want)
+	}
+	if got, err := cfg.VaultProfile("default"); err != nil || got.Addr != "http://default:8200" {
+		t.Fatalf("VaultProfile(default) = %#v, %v", got, err)
+	}
+	if _, err := cfg.VaultProfile("missing"); err == nil {
+		t.Fatal("VaultProfile(missing) error = nil, want error")
 	}
 }
 

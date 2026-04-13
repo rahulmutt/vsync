@@ -38,11 +38,19 @@ type Config struct {
 	Files []FileEntry `yaml:"files"`
 }
 
-// VaultConfig holds vault-specific settings.
-type VaultConfig struct {
+// VaultProfileConfig holds the settings for a single vault profile.
+type VaultProfileConfig struct {
+	Addr        string `yaml:"addr"`
+	Token       string `yaml:"token"`
 	EnvPrefix   string `yaml:"env_prefix"`
 	FilesPrefix string `yaml:"files_prefix"`
 	KVVersion   int    `yaml:"kv_version"`
+}
+
+// VaultConfig holds the default vault profile plus optional named profiles.
+type VaultConfig struct {
+	VaultProfileConfig `yaml:",inline"`
+	Profiles           map[string]VaultProfileConfig `yaml:"profiles"`
 }
 
 // EnvConfig holds per-command environment variable injection config.
@@ -58,32 +66,46 @@ type CommandEntry struct {
 
 // VariableEntry maps an env var name to a vault key.
 type VariableEntry struct {
-	Name string `yaml:"name"` // env var name, e.g. GEMINI_API_KEY
-	Key  string `yaml:"key"`  // vault key, e.g. gemini-api-key
+	Name    string `yaml:"name"`    // env var name, e.g. GEMINI_API_KEY
+	Key     string `yaml:"key"`     // vault key, e.g. gemini-api-key
+	Profile string `yaml:"profile"` // vault profile to use (default if omitted)
 }
 
 // FileEntry maps a local path to a vault key.
 type FileEntry struct {
-	Path string `yaml:"path"` // local file path (~ expanded)
-	Key  string `yaml:"key"`  // vault key, e.g. pi-agent-auth
-	Mode string `yaml:"mode"` // file permission, default "0600"
+	Path    string `yaml:"path"`    // local file path (~ expanded)
+	Key     string `yaml:"key"`     // vault key, e.g. pi-agent-auth
+	Mode    string `yaml:"mode"`    // file permission, default "0600"
+	Profile string `yaml:"profile"` // vault profile to use (default if omitted)
 }
 
 // defaults fills in zero values with sensible defaults.
 func (c *Config) defaults() {
-	if c.Vault.EnvPrefix == "" {
-		c.Vault.EnvPrefix = "secret/data/vsync/env"
-	}
-	if c.Vault.FilesPrefix == "" {
-		c.Vault.FilesPrefix = "secret/data/vsync/files"
-	}
-	if c.Vault.KVVersion == 0 {
-		c.Vault.KVVersion = 2
-	}
+	c.Vault.defaults()
 	for i := range c.Files {
 		if c.Files[i].Mode == "" {
 			c.Files[i].Mode = "0600"
 		}
+	}
+}
+
+func (v *VaultConfig) defaults() {
+	v.VaultProfileConfig.defaults()
+	for name, prof := range v.Profiles {
+		prof.defaults()
+		v.Profiles[name] = prof
+	}
+}
+
+func (v *VaultProfileConfig) defaults() {
+	if v.EnvPrefix == "" {
+		v.EnvPrefix = "secret/data/vsync/env"
+	}
+	if v.FilesPrefix == "" {
+		v.FilesPrefix = "secret/data/vsync/files"
+	}
+	if v.KVVersion == 0 {
+		v.KVVersion = 2
 	}
 }
 
@@ -125,6 +147,19 @@ func (c *Config) FindCommand(name string) *CommandEntry {
 		}
 	}
 	return nil
+}
+
+// VaultProfile returns the named profile or the default profile if name is empty
+// or "default".
+func (c *Config) VaultProfile(name string) (VaultProfileConfig, error) {
+	if name == "" || name == "default" {
+		return c.Vault.VaultProfileConfig, nil
+	}
+	prof, ok := c.Vault.Profiles[name]
+	if !ok {
+		return VaultProfileConfig{}, fmt.Errorf("vault profile %q not found", name)
+	}
+	return prof, nil
 }
 
 // ExpandPaths expands ~ in all file paths.
@@ -215,17 +250,47 @@ func mergeConfig(dst, src *Config) {
 	if src == nil {
 		return
 	}
-	if src.Vault.EnvPrefix != "" {
-		dst.Vault.EnvPrefix = src.Vault.EnvPrefix
-	}
-	if src.Vault.FilesPrefix != "" {
-		dst.Vault.FilesPrefix = src.Vault.FilesPrefix
-	}
-	if src.Vault.KVVersion != 0 {
-		dst.Vault.KVVersion = src.Vault.KVVersion
-	}
+	dst.Vault.merge(src.Vault)
 	dst.Env.Commands = mergeCommands(dst.Env.Commands, src.Env.Commands)
 	dst.Files = mergeFiles(dst.Files, src.Files)
+}
+
+func (dst *VaultConfig) merge(src VaultConfig) {
+	dst.VaultProfileConfig = mergeVaultProfile(dst.VaultProfileConfig, src.VaultProfileConfig)
+	dst.Profiles = mergeProfiles(dst.Profiles, src.Profiles)
+}
+
+func mergeProfiles(base map[string]VaultProfileConfig, overlay map[string]VaultProfileConfig) map[string]VaultProfileConfig {
+	if base == nil {
+		base = make(map[string]VaultProfileConfig, len(overlay))
+	}
+	for name, prof := range overlay {
+		if existing, ok := base[name]; ok {
+			base[name] = mergeVaultProfile(existing, prof)
+			continue
+		}
+		base[name] = prof
+	}
+	return base
+}
+
+func mergeVaultProfile(base, overlay VaultProfileConfig) VaultProfileConfig {
+	if overlay.Addr != "" {
+		base.Addr = overlay.Addr
+	}
+	if overlay.Token != "" {
+		base.Token = overlay.Token
+	}
+	if overlay.EnvPrefix != "" {
+		base.EnvPrefix = overlay.EnvPrefix
+	}
+	if overlay.FilesPrefix != "" {
+		base.FilesPrefix = overlay.FilesPrefix
+	}
+	if overlay.KVVersion != 0 {
+		base.KVVersion = overlay.KVVersion
+	}
+	return base
 }
 
 func mergeCommands(base []CommandEntry, overlay []CommandEntry) []CommandEntry {

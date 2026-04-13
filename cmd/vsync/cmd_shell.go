@@ -8,17 +8,25 @@ import (
 	"github.com/vsync/vsync/internal/config"
 	"github.com/vsync/vsync/internal/shell"
 	"github.com/vsync/vsync/internal/shim"
+	"github.com/vsync/vsync/internal/state"
 	vlt "github.com/vsync/vsync/internal/vault"
 )
 
 var (
-	shellLaunchFn    = shell.Launch
-	loadConfigFn     = loadConfigWithOverrides
-	expandPathsFn    = func(cfg *config.Config) error { return cfg.ExpandPaths() }
-	ensureShimsFn    = shim.Ensure
-	loadCredsFn      = vlt.LoadCredentials
-	newVaultClientFn = vlt.NewClient
-	syncFilesFn      = syncFiles
+	shellLaunchFn = shell.Launch
+	loadConfigFn  = loadConfigWithOverrides
+	expandPathsFn = func(cfg *config.Config) error { return cfg.ExpandPaths() }
+	ensureShimsFn = shim.Ensure
+	loadCredsFn   = func(dirs *state.Dirs, key []byte, addrOverride, tokenOverride string) (*vlt.Credentials, error) {
+		return loadVaultCredentials(dirs, key, addrOverride, tokenOverride)
+	}
+	loadProfileCredsFn = func(dirs *state.Dirs, key []byte, profile string) (*vlt.Credentials, error) {
+		return vlt.LoadCredentialsForProfile(dirs, key, profile, "", "")
+	}
+	newVaultClientFn = func(creds *vlt.Credentials, kvVersion int) (*vlt.Client, error) {
+		return newVaultClient(creds, kvVersion)
+	}
+	syncFilesFn = syncFiles
 )
 
 func shellCmd() *cobra.Command {
@@ -63,17 +71,7 @@ exec's into a new shell with the shims directory prepended to PATH.`,
 
 			// Sync files from Vault (best-effort; warn on failure).
 			if len(cfg.Files) > 0 {
-				creds, err := loadCredsFn(dirs, key, resolveVaultAddr(), resolveVaultToken())
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "vsync: cannot load vault credentials for file sync: %v\n", err)
-				} else {
-					client, err := newVaultClientFn(creds, cfg.Vault.KVVersion)
-					if err != nil {
-						fmt.Fprintf(os.Stderr, "vsync: vault client error: %v\n", err)
-					} else {
-						syncFilesFn(dirs, key, client, cfg)
-					}
-				}
+				syncFilesFn(dirs, key, nil, cfg)
 			}
 
 			// Resolve shell binary.

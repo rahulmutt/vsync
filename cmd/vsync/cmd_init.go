@@ -4,10 +4,12 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"syscall"
 
 	"github.com/spf13/cobra"
+	"github.com/vsync/vsync/internal/config"
 	"github.com/vsync/vsync/internal/crypto"
 	"github.com/vsync/vsync/internal/state"
 	vlt "github.com/vsync/vsync/internal/vault"
@@ -20,6 +22,7 @@ var (
 	loadOrGenerateKeyFn = crypto.LoadOrGenerateKey
 	loadKeyFn           = crypto.LoadKey
 	storeCredentialsFn  = vlt.StoreCredentials
+	storeProfileCredsFn = vlt.StoreCredentialsForProfile
 	newClientFn         = vlt.NewClient
 	resolveVaultAddrFn  = resolveVaultAddr
 	resolveVaultTokenFn = resolveVaultToken
@@ -34,15 +37,25 @@ func initCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Store Vault credentials encrypted on disk",
-		Long: `init generates a local encryption key (if not present) and stores your
-Vault address and token encrypted on disk so vsync can connect to Vault
-without exposing credentials in plain text.`,
+		Long: `init generates a local encryption key (if not present) and stores Vault
+credentials for the default profile plus any additional configured profiles on disk
+so vsync can connect to Vault without exposing credentials in plain text.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dirs, err := defaultDirsFn()
 			if err != nil {
 				return err
 			}
 			if err := dirs.EnsureAll(); err != nil {
+				return err
+			}
+
+			globalCfgPath, err := resolveGlobalConfigPath()
+			if err != nil {
+				return err
+			}
+			overrideCfgPath, _ := resolveConfigPath()
+			cfg, err := loadConfigFn(globalCfgPath, overrideCfgPath)
+			if err != nil {
 				return err
 			}
 
@@ -68,54 +81,107 @@ without exposing credentials in plain text.`,
 				return err
 			}
 
-			// Resolve Vault address.
-			addr := resolveVaultAddrFn()
-			if addr == "" {
-				addr, err = promptFn("Vault address (VAULT_ADDR): ", false)
-				if err != nil {
-					return err
+			profiles := make(map[string]config.VaultProfileConfig, len(cfg.Vault.Profiles)+1)
+			profiles[defaultVaultProfileName] = cfg.Vault.VaultProfileConfig
+			for name, prof := range cfg.Vault.Profiles {
+				profiles[name] = prof
+			}
+			profileNames := make([]string, 0, len(profiles))
+			for name := range profiles {
+				profileNames = append(profileNames, name)
+			}
+			sort.Strings(profileNames)
+
+			for _, profileName := range profileNames {
+				prof := profiles[profileName]
+				label := profileName
+				if profileName == defaultVaultProfileName {
+					label = "default"
 				}
-			}
-			addr = strings.TrimSpace(addr)
-			if addr == "" {
-				return fmt.Errorf("vault address is required")
-			}
 
-			// Resolve Vault token.
-			token := resolveVaultTokenFn()
-			if token == "" {
-				token, err = promptFn("Vault token (VAULT_TOKEN): ", true)
-				if err != nil {
-					return err
+				addr := prof.Addr
+				if profileName == defaultVaultProfileName {
+					if v := resolveVaultAddrFn(); v != "" {
+						addr = v
+					}
 				}
-			}
-			token = strings.TrimSpace(token)
-			if token == "" {
-				return fmt.Errorf("vault token is required")
-			}
+				if addr == "" {
+					if profileName == defaultVaultProfileName {
+						if stored, err := loadCredsFn(dirs, key, "", ""); err == nil {
+							addr = stored.Addr
+						}
+					} else {
+						if stored, err := loadProfileCredsFn(dirs, key, profileName); err == nil {
+							addr = stored.Addr
+						}
+					}
+				}
+				if addr == "" {
+					addr, err = promptFn(fmt.Sprintf("Vault address (%s): ", label), false)
+					if err != nil {
+						return err
+					}
+				}
+				addr = strings.TrimSpace(addr)
+				if addr == "" {
+					return fmt.Errorf("vault address is required for profile %q", profileName)
+				}
 
-			// Store encrypted.
-			if err := storeCredentialsFn(dirs, key, addr, token); err != nil {
-				return err
-			}
+				token := prof.Token
+				if profileName == defaultVaultProfileName {
+					if v := resolveVaultTokenFn(); v != "" {
+						token = v
+					}
+				}
+				if token == "" {
+					if profileName == defaultVaultProfileName {
+						if stored, err := loadCredsFn(dirs, key, "", ""); err == nil {
+							token = stored.Token
+						}
+					} else {
+						if stored, err := loadProfileCredsFn(dirs, key, profileName); err == nil {
+							token = stored.Token
+						}
+					}
+				}
+				if token == "" {
+					token, err = promptFn(fmt.Sprintf("Vault token (%s): ", label), true)
+					if err != nil {
+						return err
+					}
+				}
+				token = strings.TrimSpace(token)
+				if token == "" {
+					return fmt.Errorf("vault token is required for profile %q", profileName)
+				}
 
-			// Verify connectivity.
-			fmt.Print("vsync: verifying vault connectivity… ")
-			creds := &vlt.Credentials{Addr: addr, Token: token}
-			client, err := newClientFn(creds, 2)
-			if err != nil {
-				fmt.Println("✗")
-				return fmt.Errorf("create vault client: %w", err)
-			}
-			if err := client.Ping(); err != nil {
-				fmt.Println("✗")
-				fmt.Fprintf(os.Stderr, "vsync: warning: vault ping failed: %v\n", err)
-				fmt.Println("vsync: credentials stored, but vault is not reachable right now.")
-			} else {
-				fmt.Println("✓")
-				ttl, err := client.TokenTTL()
-				if err == nil && ttl > 0 && ttl.Hours() < 1 {
-					fmt.Fprintf(os.Stderr, "vsync: warning: vault token expires in %.0f minutes\n", ttl.Minutes())
+				if profileName == defaultVaultProfileName {
+					if err := storeCredentialsFn(dirs, key, addr, token); err != nil {
+						return err
+					}
+				} else {
+					if err := storeProfileCredsFn(dirs, key, profileName, addr, token); err != nil {
+						return err
+					}
+				}
+
+				fmt.Printf("vsync: verifying vault connectivity for profile %s… ", label)
+				creds := &vlt.Credentials{Addr: addr, Token: token}
+				client, err := newClientFn(creds, prof.KVVersion)
+				if err != nil {
+					fmt.Println("✗")
+					return fmt.Errorf("create vault client for profile %q: %w", profileName, err)
+				}
+				if err := client.Ping(); err != nil {
+					fmt.Println("✗")
+					fmt.Fprintf(os.Stderr, "vsync: warning: vault ping failed for profile %s: %v\n", label, err)
+					fmt.Printf("vsync: credentials stored for profile %s, but vault is not reachable right now.\n", label)
+				} else {
+					fmt.Println("✓")
+					ttl, err := client.TokenTTL()
+					if err == nil && ttl > 0 && ttl.Hours() < 1 {
+						fmt.Fprintf(os.Stderr, "vsync: warning: vault token for profile %s expires in %.0f minutes\n", label, ttl.Minutes())
+					}
 				}
 			}
 
