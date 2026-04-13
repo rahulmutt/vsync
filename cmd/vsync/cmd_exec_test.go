@@ -247,3 +247,30 @@ func TestExecCmdPropagatesConfigLoadError(t *testing.T) {
 		t.Fatalf("execCmd() error = %v, want cfg error", err)
 	}
 }
+
+func TestExecCmdPropagatesFilterError(t *testing.T) {
+	_, key, cfgPath := setupExecTest(t)
+	if err := os.WriteFile(cfgPath, []byte("env:\n  commands:\n    - name: pi\n      filter: args[\n      variables:\n        - name: GEMINI_API_KEY\n          key: gemini-api-key\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	flagVaultAddr = "http://addr"
+	flagVaultToken = "token"
+	if err := vlt.StoreCredentials(globalDirs, key, "http://addr", "token"); err != nil {
+		t.Fatal(err)
+	}
+
+	origExec := execRealCommand
+	defer func() { execRealCommand = origExec }()
+	execRealCommand = func(string, []string, map[string]string, string) error {
+		t.Fatal("execRealCommand should not be called on filter error")
+		return nil
+	}
+
+	cmd := execCmd()
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	cmd.SetArgs([]string{"pi", "--plain"})
+	if err := cmd.ExecuteContext(context.Background()); err == nil || !strings.Contains(err.Error(), "evaluate filter for command \"pi\"") {
+		t.Fatalf("execCmd() error = %v, want filter error", err)
+	}
+}

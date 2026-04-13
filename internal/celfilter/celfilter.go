@@ -8,6 +8,15 @@ import (
 	"github.com/google/cel-go/cel"
 )
 
+var newEnvFn = func(opts ...cel.EnvOption) (celEnv, error) {
+	return cel.NewEnv(opts...)
+}
+
+type celEnv interface {
+	Compile(string) (*cel.Ast, *cel.Issues)
+	Program(*cel.Ast, ...cel.ProgramOption) (cel.Program, error)
+}
+
 // Matches evaluates expr against the provided command args.
 //
 // The CEL environment exposes a single variable:
@@ -20,7 +29,7 @@ func Matches(expr string, args []string) (bool, error) {
 		return true, nil
 	}
 
-	env, err := cel.NewEnv(cel.Variable("args", cel.ListType(cel.StringType)))
+	env, err := newEnvFn(cel.Variable("args", cel.ListType(cel.StringType)))
 	if err != nil {
 		return false, fmt.Errorf("create CEL environment: %w", err)
 	}
