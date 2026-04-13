@@ -202,3 +202,17 @@ func TestDeleteCacheAllProfilesReturnsDeleteError(t *testing.T) {
 		t.Fatal("DeleteCacheAllProfiles() error = nil, want delete failure")
 	}
 }
+
+func TestDeleteCacheAllProfilesReturnsReadDirErrorOnFile(t *testing.T) {
+	base := t.TempDir()
+	dirs := &state.Dirs{Base: base, Keys: filepath.Join(base, "keys"), Tokens: filepath.Join(base, "tokens"), Cache: filepath.Join(base, "cache"), Shims: filepath.Join(base, "shims")}
+	if err := dirs.EnsureAll(); err != nil {
+		t.Fatal(err)
+	}
+	origReadDir := readDirFn
+	defer func() { readDirFn = origReadDir }()
+	readDirFn = func(string) ([]os.DirEntry, error) { return nil, errors.New("read dir") }
+	if err := DeleteCacheAllProfiles(dirs, "env", "foo"); err == nil {
+		t.Fatal("DeleteCacheAllProfiles() error = nil, want read-dir failure")
+	}
+}

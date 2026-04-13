@@ -13,7 +13,10 @@ import (
 	"github.com/vsync/vsync/internal/state"
 )
 
-var jsonMarshalFn = json.Marshal
+var (
+	jsonMarshalFn = json.Marshal
+	readDirFn     = os.ReadDir
+)
 
 // CacheEntry is the JSON structure stored inside an encrypted cache file.
 type CacheEntry struct {
@@ -96,7 +99,7 @@ func DeleteCacheAllProfiles(dirs *state.Dirs, kind, name string) error {
 		return err
 	}
 	cacheDir := filepath.Join(dirs.Cache, kind)
-	entries, err := os.ReadDir(cacheDir)
+	entries, err := readDirFn(cacheDir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
@@ -115,7 +118,7 @@ func DeleteCacheAllProfiles(dirs *state.Dirs, kind, name string) error {
 // ClearCacheKind removes all cache entries of the given kind ("env" or "files").
 func ClearCacheKind(dirs *state.Dirs, kind string) error {
 	cacheDir := filepath.Join(dirs.Cache, kind)
-	entries, err := os.ReadDir(cacheDir)
+	entries, err := readDirFn(cacheDir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
