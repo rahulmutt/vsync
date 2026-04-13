@@ -191,6 +191,7 @@ It syncs files, writes shims, then execs into the shell with `PATH` prefixed by 
 
 Internal entry-point used by shims.
 
+- `--dry-run` shows whether the invocation matches the configured filter and which environment variables would be injected
 - resolves the configured command
 - evaluates the command `filter` CEL expression against the command arguments, when present
 - chooses the profile for each variable

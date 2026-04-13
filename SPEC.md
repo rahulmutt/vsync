@@ -214,6 +214,9 @@ Nested shells are rejected when `VSYNC_ACTIVE=1` is already set.
 
 Internal shim entry-point.
 
+Flags:
+- `--dry-run` prints whether the invocation matches the configured filter and which environment variables would be injected, without fetching secrets or execing the real binary.
+
 Steps:
 1. Load merged config and find the matching command entry.
 2. Evaluate the command `filter` CEL expression against the command arguments, when present.

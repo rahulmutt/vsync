@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/spf13/cobra"
 	"github.com/vsync/vsync/internal/celfilter"
@@ -19,17 +20,20 @@ var (
 )
 
 func execCmd() *cobra.Command {
+	var dryRun bool
+
 	cmd := &cobra.Command{
-		Use:                "exec <command> [args...]",
-		Short:              "Fetch secrets for a command and exec it (used by shims)",
-		DisableFlagParsing: true,
-		Args:               cobra.MinimumNArgs(1),
+		Use:   "exec <command> [args...]",
+		Short: "Fetch secrets for a command and exec it (used by shims)",
+		Long: `exec resolves the configured command, evaluates its filter, fetches any
+required Vault-backed environment variables, and execs the real binary.
+
+Use --dry-run to inspect whether the current invocation matches the configured
+filter and which environment variables would be injected.`,
+		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			commandName := args[0]
 			commandArgs := args[1:]
-
-			dirs := globalDirs
-			key := globalKey
 
 			globalCfgPath, err := resolveGlobalConfigPath()
 			if err != nil {
@@ -41,27 +45,28 @@ func execCmd() *cobra.Command {
 				return err
 			}
 
+			if dryRun {
+				return dryRunConfiguredCommand(cmd.OutOrStdout(), cfg, commandName, commandArgs)
+			}
+
+			dirs := globalDirs
+			key := globalKey
 			return execConfiguredCommand(cfg, commandName, commandArgs, dirs, key)
 		},
 	}
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Show whether the invocation matches the configured filter and which env vars would be injected")
+	cmd.Flags().SetInterspersed(false)
 	return cmd
 }
 
 func execConfiguredCommand(cfg *config.Config, commandName string, commandArgs []string, dirs *state.Dirs, key []byte) error {
-	entry := cfg.FindCommand(commandName)
-	if entry == nil {
-		// No config for this command — exec it directly without modifications.
-		return execRealCommand(commandName, commandArgs, nil, dirs.Shims)
+	entry, matched, err := resolveExecCommand(cfg, commandName, commandArgs)
+	if err != nil {
+		return err
 	}
-
-	if entry.Filter != "" {
-		matched, err := celfilter.Matches(entry.Filter, commandArgs)
-		if err != nil {
-			return fmt.Errorf("evaluate filter for command %q: %w", commandName, err)
-		}
-		if !matched {
-			return execRealCommand(commandName, commandArgs, nil, dirs.Shims)
-		}
+	if entry == nil || !matched {
+		// No config for this command, or filter did not match — exec it directly.
+		return execRealCommand(commandName, commandArgs, nil, dirs.Shims)
 	}
 
 	// Fetch secrets for each variable.
@@ -96,4 +101,50 @@ func execConfiguredCommand(cfg *config.Config, commandName string, commandArgs [
 	}
 
 	return execRealCommand(commandName, commandArgs, extraEnv, dirs.Shims)
+}
+
+func dryRunConfiguredCommand(out io.Writer, cfg *config.Config, commandName string, commandArgs []string) error {
+	entry, matched, err := resolveExecCommand(cfg, commandName, commandArgs)
+	if err != nil {
+		return err
+	}
+
+	fmt.Fprintf(out, "vsync: dry-run for %q\n", commandName)
+	if entry == nil {
+		fmt.Fprintln(out, "vsync: command is not configured; no environment variables would be injected")
+		return nil
+	}
+
+	if entry.Filter == "" {
+		fmt.Fprintln(out, "vsync: filter matched: true (no filter configured)")
+	} else {
+		fmt.Fprintf(out, "vsync: filter matched: %t\n", matched)
+	}
+
+	if !matched || len(entry.Variables) == 0 {
+		fmt.Fprintln(out, "vsync: environment variables to inject: none")
+		return nil
+	}
+
+	fmt.Fprintln(out, "vsync: environment variables to inject:")
+	for _, v := range entry.Variables {
+		fmt.Fprintf(out, "vsync:   %s\n", v.Name)
+	}
+	return nil
+}
+
+func resolveExecCommand(cfg *config.Config, commandName string, commandArgs []string) (*config.CommandEntry, bool, error) {
+	entry := cfg.FindCommand(commandName)
+	if entry == nil {
+		return nil, false, nil
+	}
+
+	if entry.Filter == "" {
+		return entry, true, nil
+	}
+	matched, err := celfilter.Matches(entry.Filter, commandArgs)
+	if err != nil {
+		return nil, false, fmt.Errorf("evaluate filter for command %q: %w", commandName, err)
+	}
+	return entry, matched, nil
 }

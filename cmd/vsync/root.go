@@ -50,6 +50,11 @@ loaded from a global config file and, optionally, a local override config.`,
 			if cmd.Name() == "init" {
 				return nil
 			}
+			if cmd.Name() == "exec" {
+				if dryRun, err := cmd.Flags().GetBool("dry-run"); err == nil && dryRun {
+					return nil
+				}
+			}
 			dirs, err := resolveDirsFn()
 			if err != nil {
 				return err

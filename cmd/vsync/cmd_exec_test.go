@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -272,5 +273,105 @@ func TestExecCmdPropagatesFilterError(t *testing.T) {
 	cmd.SetArgs([]string{"pi", "--plain"})
 	if err := cmd.ExecuteContext(context.Background()); err == nil || !strings.Contains(err.Error(), "evaluate filter for command \"pi\"") {
 		t.Fatalf("execCmd() error = %v, want filter error", err)
+	}
+}
+
+func TestExecCmdDryRunReportsMatchAndInjectedEnv(t *testing.T) {
+	_, _, cfgPath := setupExecTest(t)
+	if err := os.WriteFile(cfgPath, []byte("env:\n  commands:\n    - name: pi\n      filter: args.exists(a, a == \"--with-secrets\")\n      variables:\n        - name: GEMINI_API_KEY\n          key: gemini-api-key\n        - name: ANOTHER_KEY\n          key: another-key\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	origResolveDirs := resolveDirsFn
+	origExec := execRealCommand
+	origLoadCreds := loadCredsFn
+	origNewClient := newVaultClientFn
+	origSecret := getCachedEnvSecret
+	defer func() {
+		resolveDirsFn = origResolveDirs
+		execRealCommand = origExec
+		loadCredsFn = origLoadCreds
+		newVaultClientFn = origNewClient
+		getCachedEnvSecret = origSecret
+	}()
+	resolveDirsFn = func() (*state.Dirs, error) {
+		t.Fatal("resolveDirsFn should not be called for exec --dry-run")
+		return nil, nil
+	}
+	execRealCommand = func(string, []string, map[string]string, string) error {
+		t.Fatal("execRealCommand should not be called for exec --dry-run")
+		return nil
+	}
+	loadCredsFn = func(*state.Dirs, []byte, string, string) (*vlt.Credentials, error) {
+		t.Fatal("loadCredsFn should not be called for exec --dry-run")
+		return nil, nil
+	}
+	newVaultClientFn = func(*vlt.Credentials, int) (*vlt.Client, error) {
+		t.Fatal("newVaultClientFn should not be called for exec --dry-run")
+		return nil, nil
+	}
+	getCachedEnvSecret = func(*state.Dirs, []byte, *vlt.Client, string, string, ...string) (string, error) {
+		t.Fatal("getCachedEnvSecret should not be called for exec --dry-run")
+		return "", nil
+	}
+
+	var out bytes.Buffer
+	cmd := execCmd()
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	cmd.SetArgs([]string{"--dry-run", "pi", "--with-secrets"})
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("execCmd() error = %v, want nil", err)
+	}
+
+	got := out.String()
+	for _, want := range []string{
+		"vsync: dry-run for \"pi\"",
+		"vsync: filter matched: true",
+		"vsync: environment variables to inject:",
+		"vsync:   GEMINI_API_KEY",
+		"vsync:   ANOTHER_KEY",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("dry-run output = %q, want %q", got, want)
+		}
+	}
+}
+
+func TestExecCmdDryRunReportsFilterMismatch(t *testing.T) {
+	_, _, cfgPath := setupExecTest(t)
+	if err := os.WriteFile(cfgPath, []byte("env:\n  commands:\n    - name: pi\n      filter: args.exists(a, a == \"--with-secrets\")\n      variables:\n        - name: GEMINI_API_KEY\n          key: gemini-api-key\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	origExec := execRealCommand
+	defer func() { execRealCommand = origExec }()
+	execRealCommand = func(string, []string, map[string]string, string) error {
+		t.Fatal("execRealCommand should not be called for exec --dry-run")
+		return nil
+	}
+
+	var out bytes.Buffer
+	cmd := execCmd()
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	cmd.SetArgs([]string{"--dry-run", "pi", "--plain"})
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("execCmd() error = %v, want nil", err)
+	}
+
+	got := out.String()
+	for _, want := range []string{
+		"vsync: dry-run for \"pi\"",
+		"vsync: filter matched: false",
+		"vsync: environment variables to inject: none",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("dry-run output = %q, want %q", got, want)
+		}
 	}
 }
