@@ -1,6 +1,6 @@
 {
   "name": "vsync",
-  "image": "ghcr.io/rahulmutt/dev:sha-45d631e",
+  "image": "ghcr.io/rahulmutt/dev:sha-2ac4cf6",
   "workspaceFolder": "/workspace",
   "remoteUser": "dev",
   "containerEnv": {
