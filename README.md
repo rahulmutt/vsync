@@ -121,6 +121,9 @@ Global config path:
 ### Config shape
 
 ```yaml
+defaults:
+  profile: prod  # file-local default profile for vault key references
+
 vault:
   addr: "http://127.0.0.1:8200"            # default profile bootstrap value
   token: "hvs.default-token"               # default profile bootstrap value
@@ -169,6 +172,7 @@ files:
 
 - The top-level `vault:` block is the default profile.
 - Additional profiles live under `vault.profiles`.
+- `defaults.profile` sets a file-local default profile for vault key references in that file before merging.
 - `env_groups` defines reusable bundles of environment variables.
 - Each command variable may either declare a variable directly or reference a group with `group: <name>`.
 - Groups may reference other groups, and nested expansion is checked for cycles.
@@ -205,8 +209,9 @@ Stores Vault credentials encrypted on disk and generates the encryption key.
 vsync init [--vault-addr ADDR] [--vault-token TOKEN] [--rotate-key]
 ```
 
-- The default profile uses flags, environment variables, config values, any already stored credentials, and prompts.
-- Additional profiles use config values, any already stored credentials, and prompts.
+- The default profile is initialised first and uses flags, environment variables, config values, any already stored credentials, and prompts.
+- Additional profiles use config values, then inherit any missing address/token from the default profile, then any already stored credentials, and finally prompts.
+- If Vault rejects the credentials for a profile, `vsync init` warns and reprompts until they verify successfully.
 - The command verifies each profile with Vault and warns on short token TTLs.
 
 ### `vsync shell`

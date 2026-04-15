@@ -211,10 +211,11 @@ Steps:
 1. Create state/cache directories.
 2. Generate or load the key file.
 3. Load the merged config to discover profiles.
-4. For the default profile, resolve address/token from flags → env → config → stored credentials → prompt.
-5. For additional profiles, resolve address/token from config → stored credentials → prompt.
+4. Initialise the default profile first, resolving address/token from flags → env → config → stored credentials → prompt.
+5. Then initialise additional profiles, resolving address/token from config → inherited default-profile values → stored credentials → prompt.
 6. Encrypt and store credentials per profile.
-7. Verify each profile with `LookupSelf()` and warn on short TTLs.
+7. Verify each profile with `LookupSelf()`; if the client cannot be created or Vault rejects the credentials, warn and reprompt until valid credentials are entered.
+8. Warn on short token TTLs.
 
 ### `vsync shell`
 
