@@ -116,9 +116,11 @@ func (c *Config) defaults() {
 
 func (v *VaultConfig) defaults() {
 	v.VaultProfileConfig.defaults()
+}
+
+func (v *VaultConfig) InheritProfiles() {
 	for name, prof := range v.Profiles {
-		prof.defaults()
-		v.Profiles[name] = prof
+		v.Profiles[name] = mergeVaultProfile(v.VaultProfileConfig, prof)
 	}
 }
 
@@ -141,6 +143,7 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	cfg.defaults()
+	cfg.Vault.InheritProfiles()
 	if err := cfg.resolveEnvGroups(); err != nil {
 		return nil, err
 	}
@@ -164,6 +167,7 @@ func LoadOrEmpty(globalPath, overridePath string) (*Config, error) {
 		mergeConfig(cfg, src)
 	}
 	cfg.defaults()
+	cfg.Vault.InheritProfiles()
 	if err := cfg.resolveEnvGroups(); err != nil {
 		return nil, err
 	}
@@ -190,7 +194,7 @@ func (c *Config) VaultProfile(name string) (VaultProfileConfig, error) {
 	if !ok {
 		return VaultProfileConfig{}, fmt.Errorf("vault profile %q not found", name)
 	}
-	return prof, nil
+	return mergeVaultProfile(c.Vault.VaultProfileConfig, prof), nil
 }
 
 // ExpandPaths expands ~ in all file paths.

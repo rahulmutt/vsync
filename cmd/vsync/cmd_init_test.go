@@ -155,7 +155,7 @@ func TestInitCmdStoresMultipleProfiles(t *testing.T) {
 		_, _ = w.Write([]byte(`{"auth":{"lease_duration":1800}}`))
 	}))
 	defer server.Close()
-	if err := os.WriteFile(cfgPath, []byte("vault:\n  profiles:\n    prod:\n      addr: "+server.URL+"\n      token: prod-token\n      env_prefix: prod/env\n      files_prefix: prod/files\n"), 0600); err != nil {
+	if err := os.WriteFile(cfgPath, []byte("vault:\n  addr: "+server.URL+"\n  token: default-token\n  profiles:\n    prod:\n      env_prefix: prod/env\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	flagVaultAddr = server.URL
@@ -182,7 +182,7 @@ func TestInitCmdStoresMultipleProfiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadCredentialsForProfile(prod) error = %v", err)
 	}
-	if prodCreds.Addr != server.URL || prodCreds.Token != "prod-token" {
+	if prodCreds.Addr != server.URL || prodCreds.Token != "default-token" {
 		t.Fatalf("prod creds = %#v", prodCreds)
 	}
 	if _, err := os.Stat(dirs.ProfileTokenFile("prod", "vault_addr")); err != nil {

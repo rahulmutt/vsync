@@ -97,7 +97,7 @@ files:
 - Duplicate env var names inside the expanded result of any group or command are rejected as conflicts.
 - Each secret reference may include `profile: <name>`.
 - If `profile` is omitted, the default profile is used.
-- `env_prefix`, `files_prefix`, and `kv_version` default per profile if omitted.
+- Additional profiles inherit from the default profile; any omitted `env_prefix`, `files_prefix`, or `kv_version` falls back to the default profile's value (which itself falls back to built-in defaults).
 - Environment groups are expanded before execution; later variables in a command can override variables pulled in from a group.
 
 ### Command filters

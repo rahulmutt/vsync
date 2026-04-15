@@ -449,11 +449,7 @@ func TestLoadSupportsProfilesAndReferenceProfiles(t *testing.T) {
   kv_version: 1
   profiles:
     prod:
-      addr: http://prod:8200
-      token: prod-token
       env_prefix: prod/env
-      files_prefix: prod/files
-      kv_version: 2
 env:
   commands:
     - name: pi
@@ -477,11 +473,10 @@ files:
 	if got, want := cfg.Vault.Addr, "http://default:8200"; got != want {
 		t.Fatalf("default addr = %q, want %q", got, want)
 	}
-	if got, want := cfg.Vault.Profiles["prod"].KVVersion, 2; got != want {
-		t.Fatalf("prod kv_version = %d, want %d", got, want)
-	}
-	if got, want := cfg.Vault.Profiles["prod"].EnvPrefix, "prod/env"; got != want {
-		t.Fatalf("prod env_prefix = %q, want %q", got, want)
+	if got, err := cfg.VaultProfile("prod"); err != nil {
+		t.Fatalf("VaultProfile(prod) error = %v", err)
+	} else if got.Addr != "http://default:8200" || got.Token != "default-token" || got.EnvPrefix != "prod/env" || got.FilesPrefix != "default/files" || got.KVVersion != 1 {
+		t.Fatalf("VaultProfile(prod) = %#v, want inherited default values", got)
 	}
 	pi := cfg.FindCommand("pi")
 	if pi == nil {
@@ -721,6 +716,18 @@ func TestVaultProfileDefaultAndMissing(t *testing.T) {
 	}
 	if _, err := cfg.VaultProfile("missing"); err == nil {
 		t.Fatal("VaultProfile(missing) error = nil, want error")
+	}
+}
+
+func TestVaultProfileInheritsDefaultValues(t *testing.T) {
+	cfg := &Config{Vault: VaultConfig{VaultProfileConfig: VaultProfileConfig{Addr: "http://default:8200", Token: "default-token", EnvPrefix: "default/env", FilesPrefix: "default/files", KVVersion: 2}, Profiles: map[string]VaultProfileConfig{"prod": {EnvPrefix: "prod/env"}}}}
+	got, err := cfg.VaultProfile("prod")
+	if err != nil {
+		t.Fatalf("VaultProfile(prod) error = %v", err)
+	}
+	want := VaultProfileConfig{Addr: "http://default:8200", Token: "default-token", EnvPrefix: "prod/env", FilesPrefix: "default/files", KVVersion: 2}
+	if got != want {
+		t.Fatalf("VaultProfile(prod) = %#v, want %#v", got, want)
 	}
 }
 

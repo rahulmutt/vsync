@@ -9,7 +9,6 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
-	"github.com/vsync/vsync/internal/config"
 	"github.com/vsync/vsync/internal/crypto"
 	"github.com/vsync/vsync/internal/state"
 	vlt "github.com/vsync/vsync/internal/vault"
@@ -81,10 +80,10 @@ so vsync can connect to Vault without exposing credentials in plain text.`,
 				return err
 			}
 
-			profiles := make(map[string]config.VaultProfileConfig, len(cfg.Vault.Profiles)+1)
-			profiles[defaultVaultProfileName] = cfg.Vault.VaultProfileConfig
-			for name, prof := range cfg.Vault.Profiles {
-				profiles[name] = prof
+			profiles := make(map[string]struct{}, len(cfg.Vault.Profiles)+1)
+			profiles[defaultVaultProfileName] = struct{}{}
+			for name := range cfg.Vault.Profiles {
+				profiles[name] = struct{}{}
 			}
 			profileNames := make([]string, 0, len(profiles))
 			for name := range profiles {
@@ -93,7 +92,10 @@ so vsync can connect to Vault without exposing credentials in plain text.`,
 			sort.Strings(profileNames)
 
 			for _, profileName := range profileNames {
-				prof := profiles[profileName]
+				prof, err := cfg.VaultProfile(profileName)
+				if err != nil {
+					return err
+				}
 				label := profileName
 				if profileName == defaultVaultProfileName {
 					label = "default"

@@ -71,8 +71,16 @@ func statusCmd() *cobra.Command {
 				}
 
 				fmt.Printf("\nVault profiles:\n")
-				fmt.Printf("  %-20s %s\n", "default", profileSummary(cfg.Vault.VaultProfileConfig))
-				for name, prof := range cfg.Vault.Profiles {
+				defaultProfile, err := cfg.VaultProfile("default")
+				if err != nil {
+					return err
+				}
+				fmt.Printf("  %-20s %s\n", "default", profileSummary(defaultProfile))
+				for name := range cfg.Vault.Profiles {
+					prof, err := cfg.VaultProfile(name)
+					if err != nil {
+						return err
+					}
 					fmt.Printf("  %-20s %s\n", name, profileSummary(prof))
 				}
 

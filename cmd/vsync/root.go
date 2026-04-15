@@ -197,6 +197,7 @@ func applyVaultOverrides(cfg *config.Config) error {
 	} else if v != 0 {
 		cfg.Vault.KVVersion = v
 	}
+	cfg.Vault.InheritProfiles()
 	return nil
 }
 
