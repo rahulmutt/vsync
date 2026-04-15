@@ -66,6 +66,7 @@ type CommandEntry struct {
 }
 
 // VariableEntry maps an env var name to a vault key.
+// If Key is omitted, it defaults to Name.
 type VariableEntry struct {
 	Name    string `yaml:"name"`    // env var name, e.g. GEMINI_API_KEY
 	Key     string `yaml:"key"`     // vault key, e.g. gemini-api-key
@@ -83,6 +84,13 @@ type FileEntry struct {
 // defaults fills in zero values with sensible defaults.
 func (c *Config) defaults() {
 	c.Vault.defaults()
+	for i := range c.Env.Commands {
+		for j := range c.Env.Commands[i].Variables {
+			if c.Env.Commands[i].Variables[j].Key == "" {
+				c.Env.Commands[i].Variables[j].Key = c.Env.Commands[i].Variables[j].Name
+			}
+		}
+	}
 	for i := range c.Files {
 		if c.Files[i].Mode == "" {
 			c.Files[i].Mode = "0600"

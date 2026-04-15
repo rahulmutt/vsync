@@ -64,7 +64,7 @@ env:
           key: openai-api-key
           profile: staging
         - name: ANTHROPIC_API_KEY
-          key: anthropic-api-key   # defaults to the default profile
+          key: anthropic-api-key   # defaults to the env var name if omitted
 
 files:
   - path: ~/.pi/agent/auth.json

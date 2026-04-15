@@ -20,7 +20,8 @@ env:
     - name: pi
       variables:
         - name: GEMINI_API_KEY
-          key: gemini-api-key
+        - name: OPENAI_API_KEY
+          key: openai-api-key
 files:
   - path: ~/notes.txt
     key: notes
@@ -40,6 +41,12 @@ files:
 	}
 	if got, want := cfg.Vault.KVVersion, 2; got != want {
 		t.Fatalf("KVVersion = %d, want %d", got, want)
+	}
+	if got, want := cfg.Env.Commands[0].Variables[0].Key, "GEMINI_API_KEY"; got != want {
+		t.Fatalf("default env key = %q, want %q", got, want)
+	}
+	if got, want := cfg.Env.Commands[0].Variables[1].Key, "openai-api-key"; got != want {
+		t.Fatalf("explicit env key = %q, want %q", got, want)
 	}
 	if got, want := cfg.Files[0].Mode, "0600"; got != want {
 		t.Fatalf("default file mode = %q, want %q", got, want)
@@ -143,7 +150,6 @@ env:
     - name: pi
       variables:
         - name: GEMINI_API_KEY
-          key: child-gemini
         - name: ANTHROPIC_API_KEY
           key: child-anthropic
 files:
@@ -188,7 +194,7 @@ files:
 	if got, want := len(pi.Variables), 3; got != want {
 		t.Fatalf("pi variables = %d, want %d", got, want)
 	}
-	if got, want := pi.Variables[0], (VariableEntry{Name: "GEMINI_API_KEY", Key: "child-gemini"}); got != want {
+	if got, want := pi.Variables[0], (VariableEntry{Name: "GEMINI_API_KEY", Key: "GEMINI_API_KEY"}); got != want {
 		t.Fatalf("pi variable[0] = %#v, want %#v", got, want)
 	}
 	if got, want := pi.Variables[1], (VariableEntry{Name: "OPENAI_API_KEY", Key: "root-openai"}); got != want {
