@@ -321,3 +321,131 @@ env:
 		t.Fatalf("statusCmd() error = %v", err)
 	}
 }
+
+func TestInitCmdVaultProfileLookupError(t *testing.T) {
+	_, _ = setupCoverageState(t)
+	t.Setenv("VAULT_ADDR", "")
+	t.Setenv("VAULT_TOKEN", "")
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/auth/token/lookup-self" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"auth":{"lease_duration":0}}`)
+	}))
+	defer server.Close()
+
+	cfg := &config.Config{
+		Vault: config.VaultConfig{
+			VaultProfileConfig: config.VaultProfileConfig{Addr: server.URL, Token: "default-token", KVVersion: 2},
+			Profiles: map[string]config.VaultProfileConfig{
+				"work": {Addr: server.URL, Token: "work-token", KVVersion: 2},
+			},
+		},
+	}
+
+	origLoadCfg, origStoreDefault, origStoreProfile, origLookup := loadConfigFn, storeCredentialsFn, storeProfileCredsFn, vaultProfileLookupFn
+	defer func() {
+		loadConfigFn = origLoadCfg
+		storeCredentialsFn = origStoreDefault
+		storeProfileCredsFn = origStoreProfile
+		vaultProfileLookupFn = origLookup
+	}()
+	loadConfigFn = func(string, string) (*config.Config, error) { return cfg, nil }
+	storeCredentialsFn = func(_ *state.Dirs, _ []byte, _, _ string) error { return nil }
+	storeProfileCredsFn = func(_ *state.Dirs, _ []byte, _, _, _ string) error { return nil }
+	vaultProfileLookupFn = func(cfg *config.Config, name string) (config.VaultProfileConfig, error) {
+		if name == "work" {
+			return config.VaultProfileConfig{}, errors.New("profile-lookup")
+		}
+		return cfg.VaultProfile(name)
+	}
+
+	cmd := initCmd()
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	if err := cmd.ExecuteContext(context.Background()); err == nil || !strings.Contains(err.Error(), "profile-lookup") {
+		t.Fatalf("initCmd() error = %v, want profile-lookup error", err)
+	}
+}
+
+func TestStatusCmdVaultProfileLookupErrorDefault(t *testing.T) {
+	dirs, key, _ := setupStatusTest(t)
+	cfg := &config.Config{Vault: config.VaultConfig{VaultProfileConfig: config.VaultProfileConfig{KVVersion: 2}}}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/auth/token/lookup-self" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		fmt.Fprint(w, `{"auth":{"lease_duration":90}}`)
+	}))
+	defer server.Close()
+	if err := vlt.StoreCredentials(dirs, key, server.URL, "token"); err != nil {
+		t.Fatal(err)
+	}
+
+	origLoadCfg, origLookup, origNewClient := loadConfigFn, vaultProfileLookupFn, newVaultClientFn
+	defer func() {
+		loadConfigFn = origLoadCfg
+		vaultProfileLookupFn = origLookup
+		newVaultClientFn = origNewClient
+	}()
+	loadConfigFn = func(string, string) (*config.Config, error) { return cfg, nil }
+	vaultProfileLookupFn = func(cfg *config.Config, name string) (config.VaultProfileConfig, error) {
+		return config.VaultProfileConfig{}, errors.New("default-profile")
+	}
+	newVaultClientFn = func(_ *vlt.Credentials, _ int) (*vlt.Client, error) { return nil, errors.New("client") }
+
+	cmd := statusCmd()
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	if err := cmd.ExecuteContext(context.Background()); err == nil || !strings.Contains(err.Error(), "default-profile") {
+		t.Fatalf("statusCmd() error = %v, want default-profile error", err)
+	}
+}
+
+func TestStatusCmdVaultProfileLookupErrorNamed(t *testing.T) {
+	dirs, key, _ := setupStatusTest(t)
+	cfg := &config.Config{
+		Vault: config.VaultConfig{
+			VaultProfileConfig: config.VaultProfileConfig{KVVersion: 2},
+			Profiles: map[string]config.VaultProfileConfig{
+				"work": {KVVersion: 2},
+			},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/auth/token/lookup-self" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		fmt.Fprint(w, `{"auth":{"lease_duration":90}}`)
+	}))
+	defer server.Close()
+	if err := vlt.StoreCredentials(dirs, key, server.URL, "token"); err != nil {
+		t.Fatal(err)
+	}
+
+	origLoadCfg, origLookup, origNewClient := loadConfigFn, vaultProfileLookupFn, newVaultClientFn
+	defer func() {
+		loadConfigFn = origLoadCfg
+		vaultProfileLookupFn = origLookup
+		newVaultClientFn = origNewClient
+	}()
+	loadConfigFn = func(string, string) (*config.Config, error) { return cfg, nil }
+	vaultProfileLookupFn = func(cfg *config.Config, name string) (config.VaultProfileConfig, error) {
+		if name == "work" {
+			return config.VaultProfileConfig{}, errors.New("named-profile")
+		}
+		return cfg.VaultProfile(name)
+	}
+	newVaultClientFn = func(_ *vlt.Credentials, _ int) (*vlt.Client, error) { return nil, errors.New("client") }
+
+	cmd := statusCmd()
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	if err := cmd.ExecuteContext(context.Background()); err == nil || !strings.Contains(err.Error(), "named-profile") {
+		t.Fatalf("statusCmd() error = %v, want named-profile error", err)
+	}
+}

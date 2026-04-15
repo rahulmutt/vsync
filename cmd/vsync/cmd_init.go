@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
+	"github.com/vsync/vsync/internal/config"
 	"github.com/vsync/vsync/internal/crypto"
 	"github.com/vsync/vsync/internal/state"
 	vlt "github.com/vsync/vsync/internal/vault"
@@ -23,9 +24,12 @@ var (
 	storeCredentialsFn  = vlt.StoreCredentials
 	storeProfileCredsFn = vlt.StoreCredentialsForProfile
 	newClientFn         = vlt.NewClient
-	resolveVaultAddrFn  = resolveVaultAddr
-	resolveVaultTokenFn = resolveVaultToken
-	promptFn            = prompt
+	resolveVaultAddrFn   = resolveVaultAddr
+	resolveVaultTokenFn  = resolveVaultToken
+	vaultProfileLookupFn = func(cfg *config.Config, name string) (config.VaultProfileConfig, error) {
+		return cfg.VaultProfile(name)
+	}
+	promptFn             = prompt
 	isTerminalFn        = term.IsTerminal
 	readPasswordFn      = term.ReadPassword
 )
@@ -92,7 +96,7 @@ so vsync can connect to Vault without exposing credentials in plain text.`,
 			sort.Strings(profileNames)
 
 			for _, profileName := range profileNames {
-				prof, err := cfg.VaultProfile(profileName)
+				prof, err := vaultProfileLookupFn(cfg, profileName)
 				if err != nil {
 					return err
 				}
