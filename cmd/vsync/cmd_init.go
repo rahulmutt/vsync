@@ -17,21 +17,21 @@ import (
 )
 
 var (
-	defaultDirsFn       = state.DefaultDirs
-	generateKeyFn       = crypto.GenerateKey
-	loadOrGenerateKeyFn = crypto.LoadOrGenerateKey
-	loadKeyFn           = crypto.LoadKey
-	storeCredentialsFn  = vlt.StoreCredentials
-	storeProfileCredsFn = vlt.StoreCredentialsForProfile
-	newClientFn         = vlt.NewClient
+	defaultDirsFn        = state.DefaultDirs
+	generateKeyFn        = crypto.GenerateKey
+	loadOrGenerateKeyFn  = crypto.LoadOrGenerateKey
+	loadKeyFn            = crypto.LoadKey
+	storeCredentialsFn   = vlt.StoreCredentials
+	storeProfileCredsFn  = vlt.StoreCredentialsForProfile
+	newClientFn          = vlt.NewClient
 	resolveVaultAddrFn   = resolveVaultAddr
 	resolveVaultTokenFn  = resolveVaultToken
 	vaultProfileLookupFn = func(cfg *config.Config, name string) (config.VaultProfileConfig, error) {
 		return cfg.VaultProfile(name)
 	}
-	promptFn             = prompt
-	isTerminalFn        = term.IsTerminal
-	readPasswordFn      = term.ReadPassword
+	promptFn       = prompt
+	isTerminalFn   = term.IsTerminal
+	readPasswordFn = term.ReadPassword
 )
 
 func initCmd() *cobra.Command {
@@ -96,98 +96,57 @@ so vsync can connect to Vault without exposing credentials in plain text.`,
 			sort.Strings(profileNames)
 
 			for _, profileName := range profileNames {
-				prof, err := vaultProfileLookupFn(cfg, profileName)
-				if err != nil {
-					return err
-				}
 				label := profileName
 				if profileName == defaultVaultProfileName {
 					label = "default"
 				}
 
-				addr := prof.Addr
-				if profileName == defaultVaultProfileName {
-					if v := resolveVaultAddrFn(); v != "" {
-						addr = v
-					}
-				}
-				if addr == "" {
-					if profileName == defaultVaultProfileName {
-						if stored, err := loadCredsFn(dirs, key, "", ""); err == nil {
-							addr = stored.Addr
-						}
-					} else {
-						if stored, err := loadProfileCredsFn(dirs, key, profileName); err == nil {
-							addr = stored.Addr
-						}
-					}
-				}
-				if addr == "" {
-					addr, err = promptFn(fmt.Sprintf("Vault address (%s): ", label), false)
+				promptOnly := false
+				for {
+					prof, err := vaultProfileLookupFn(cfg, profileName)
 					if err != nil {
 						return err
 					}
-				}
-				addr = strings.TrimSpace(addr)
-				if addr == "" {
-					return fmt.Errorf("vault address is required for profile %q", profileName)
-				}
 
-				token := prof.Token
-				if profileName == defaultVaultProfileName {
-					if v := resolveVaultTokenFn(); v != "" {
-						token = v
-					}
-				}
-				if token == "" {
-					if profileName == defaultVaultProfileName {
-						if stored, err := loadCredsFn(dirs, key, "", ""); err == nil {
-							token = stored.Token
-						}
-					} else {
-						if stored, err := loadProfileCredsFn(dirs, key, profileName); err == nil {
-							token = stored.Token
-						}
-					}
-				}
-				if token == "" {
-					token, err = promptFn(fmt.Sprintf("Vault token (%s): ", label), true)
+					addr, token, err := resolveInitProfileCredentials(dirs, key, prof, profileName, label, promptOnly)
 					if err != nil {
 						return err
 					}
-				}
-				token = strings.TrimSpace(token)
-				if token == "" {
-					return fmt.Errorf("vault token is required for profile %q", profileName)
-				}
 
-				if profileName == defaultVaultProfileName {
-					if err := storeCredentialsFn(dirs, key, addr, token); err != nil {
-						return err
+					fmt.Printf("vsync: verifying vault connectivity for profile %s… ", label)
+					creds := &vlt.Credentials{Addr: addr, Token: token}
+					client, err := newClientFn(creds, prof.KVVersion)
+					if err != nil {
+						fmt.Println("✗")
+						fmt.Fprintf(os.Stderr, "vsync: warning: could not create vault client for profile %s: %v\n", label, err)
+						fmt.Printf("vsync: credentials for profile %s were rejected; please enter them again.\n", label)
+						promptOnly = true
+						continue
 					}
-				} else {
-					if err := storeProfileCredsFn(dirs, key, profileName, addr, token); err != nil {
-						return err
+					if err := client.Ping(); err != nil {
+						fmt.Println("✗")
+						fmt.Fprintf(os.Stderr, "vsync: warning: vault ping failed for profile %s: %v\n", label, err)
+						fmt.Printf("vsync: credentials for profile %s were rejected; please enter them again.\n", label)
+						promptOnly = true
+						continue
 					}
-				}
 
-				fmt.Printf("vsync: verifying vault connectivity for profile %s… ", label)
-				creds := &vlt.Credentials{Addr: addr, Token: token}
-				client, err := newClientFn(creds, prof.KVVersion)
-				if err != nil {
-					fmt.Println("✗")
-					return fmt.Errorf("create vault client for profile %q: %w", profileName, err)
-				}
-				if err := client.Ping(); err != nil {
-					fmt.Println("✗")
-					fmt.Fprintf(os.Stderr, "vsync: warning: vault ping failed for profile %s: %v\n", label, err)
-					fmt.Printf("vsync: credentials stored for profile %s, but vault is not reachable right now.\n", label)
-				} else {
 					fmt.Println("✓")
+					if profileName == defaultVaultProfileName {
+						if err := storeCredentialsFn(dirs, key, addr, token); err != nil {
+							return err
+						}
+					} else {
+						if err := storeProfileCredsFn(dirs, key, profileName, addr, token); err != nil {
+							return err
+						}
+					}
+
 					ttl, err := client.TokenTTL()
 					if err == nil && ttl > 0 && ttl.Hours() < 1 {
 						fmt.Fprintf(os.Stderr, "vsync: warning: vault token for profile %s expires in %.0f minutes\n", label, ttl.Minutes())
 					}
+					break
 				}
 			}
 
@@ -200,6 +159,89 @@ so vsync can connect to Vault without exposing credentials in plain text.`,
 
 	cmd.Flags().BoolVar(&rotateKey, "rotate-key", false, "Generate a new encryption key (re-encrypt existing tokens)")
 	return cmd
+}
+
+func resolveInitProfileCredentials(dirs *state.Dirs, key []byte, prof config.VaultProfileConfig, profileName, label string, promptOnly bool) (string, string, error) {
+	if promptOnly {
+		addr, err := promptFn(fmt.Sprintf("Vault address (%s): ", label), false)
+		if err != nil {
+			return "", "", err
+		}
+		addr = strings.TrimSpace(addr)
+		if addr == "" {
+			return "", "", fmt.Errorf("vault address is required for profile %q", profileName)
+		}
+
+		token, err := promptFn(fmt.Sprintf("Vault token (%s): ", label), true)
+		if err != nil {
+			return "", "", err
+		}
+		token = strings.TrimSpace(token)
+		if token == "" {
+			return "", "", fmt.Errorf("vault token is required for profile %q", profileName)
+		}
+		return addr, token, nil
+	}
+
+	addr := prof.Addr
+	if profileName == defaultVaultProfileName {
+		if v := resolveVaultAddrFn(); v != "" {
+			addr = v
+		}
+	}
+	if addr == "" {
+		if profileName == defaultVaultProfileName {
+			if stored, err := loadCredsFn(dirs, key, "", ""); err == nil {
+				addr = stored.Addr
+			}
+		} else {
+			if stored, err := loadProfileCredsFn(dirs, key, profileName); err == nil {
+				addr = stored.Addr
+			}
+		}
+	}
+	if addr == "" {
+		var err error
+		addr, err = promptFn(fmt.Sprintf("Vault address (%s): ", label), false)
+		if err != nil {
+			return "", "", err
+		}
+	}
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return "", "", fmt.Errorf("vault address is required for profile %q", profileName)
+	}
+
+	token := prof.Token
+	if profileName == defaultVaultProfileName {
+		if v := resolveVaultTokenFn(); v != "" {
+			token = v
+		}
+	}
+	if token == "" {
+		if profileName == defaultVaultProfileName {
+			if stored, err := loadCredsFn(dirs, key, "", ""); err == nil {
+				token = stored.Token
+			}
+		} else {
+			if stored, err := loadProfileCredsFn(dirs, key, profileName); err == nil {
+				token = stored.Token
+			}
+		}
+	}
+	if token == "" {
+		var err error
+		token, err = promptFn(fmt.Sprintf("Vault token (%s): ", label), true)
+		if err != nil {
+			return "", "", err
+		}
+	}
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return "", "", fmt.Errorf("vault token is required for profile %q", profileName)
+	}
+
+	return addr, token, nil
 }
 
 func prompt(label string, secret bool) (string, error) {

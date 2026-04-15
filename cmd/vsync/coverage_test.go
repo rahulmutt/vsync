@@ -117,27 +117,60 @@ func TestInitCmdErrorBranches(t *testing.T) {
 	})
 
 	t.Run("store and client", func(t *testing.T) {
-		origStore, origClient := storeCredentialsFn, newClientFn
+		origStore, origClient, origPrompt := storeCredentialsFn, newClientFn, promptFn
 		origAddr, origToken := flagVaultAddr, flagVaultToken
 		defer func() {
 			storeCredentialsFn = origStore
 			newClientFn = origClient
+			promptFn = origPrompt
 			flagVaultAddr = origAddr
 			flagVaultToken = origToken
 		}()
-		flagVaultAddr = "http://vault"
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/v1/auth/token/lookup-self" {
+				t.Fatalf("unexpected path: %s", r.URL.Path)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"auth":{"lease_duration":1800}}`))
+		}))
+		defer server.Close()
+
+		flagVaultAddr = server.URL
 		flagVaultToken = "token"
-		storeCredentialsFn = func(*state.Dirs, []byte, string, string) error { return errors.New("store") }
-		newClientFn = func(*vlt.Credentials, int) (*vlt.Client, error) { return nil, errors.New("client") }
+		promptFn = func(label string, secret bool) (string, error) {
+			if secret {
+				return "token", nil
+			}
+			return server.URL, nil
+		}
+		calls := 0
+		newClientFn = func(creds *vlt.Credentials, kvVersion int) (*vlt.Client, error) {
+			calls++
+			if calls == 1 {
+				return nil, errors.New("client")
+			}
+			return vlt.NewClient(creds, kvVersion)
+		}
 		cmd := initCmd()
 		cmd.SilenceErrors = true
 		cmd.SilenceUsage = true
-		if err := cmd.ExecuteContext(context.Background()); err == nil || !strings.Contains(err.Error(), "store") {
-			t.Fatalf("init error = %v, want store", err)
+		if err := cmd.ExecuteContext(context.Background()); err != nil {
+			t.Fatalf("init error = %v", err)
 		}
-		storeCredentialsFn = func(*state.Dirs, []byte, string, string) error { return nil }
-		if err := cmd.ExecuteContext(context.Background()); err == nil || !strings.Contains(err.Error(), "client") {
-			t.Fatalf("init error = %v, want client", err)
+		if calls != 2 {
+			t.Fatalf("newClientFn calls = %d, want 2", calls)
+		}
+		loadedKey, err := crypto.LoadKey(dirs.KeyFile())
+		if err != nil {
+			t.Fatal(err)
+		}
+		loaded, err := vlt.LoadCredentials(dirs, loadedKey, "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if loaded.Addr != server.URL || loaded.Token != "token" {
+			t.Fatalf("loaded creds = %#v", loaded)
 		}
 	})
 
@@ -164,14 +197,32 @@ func TestInitCmdErrorBranches(t *testing.T) {
 
 		generateKeyFn = origGen
 		storeCredentialsFn = func(*state.Dirs, []byte, string, string) error { return nil }
+		var lookups int
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusInternalServerError)
+			switch r.URL.Path {
+			case "/v1/auth/token/lookup-self":
+				lookups++
+				if lookups == 1 {
+					w.WriteHeader(http.StatusInternalServerError)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprint(w, `{"auth":{"lease_duration":0}}`)
+			default:
+				t.Fatalf("unexpected path: %s", r.URL.Path)
+			}
 		}))
 		defer server.Close()
 		newClientFn = func(creds *vlt.Credentials, kvVersion int) (*vlt.Client, error) {
 			return vlt.NewClient(creds, kvVersion)
 		}
 		flagVaultAddr = server.URL
+		promptFn = func(label string, secret bool) (string, error) {
+			if secret {
+				return "token", nil
+			}
+			return server.URL, nil
+		}
 		if err := cmd.ExecuteContext(context.Background()); err != nil {
 			t.Fatalf("init error = %v, want nil", err)
 		}
@@ -1027,7 +1078,7 @@ files:
 		case "/v1/secret/data/vsync/files/full":
 			fmt.Fprint(w, `{"data":{"data":{"content":"full"},"metadata":{}}}`)
 		case "/v1/secret/data/vsync/files/fail":
-			w.WriteHeader(http.StatusInternalServerError)
+			fmt.Fprint(w, `{"data":{"data":{},"metadata":{}}}`)
 		default:
 			w.WriteHeader(http.StatusInternalServerError)
 		}
