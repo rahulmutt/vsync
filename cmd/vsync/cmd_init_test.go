@@ -190,7 +190,7 @@ func TestInitCmdStoresMultipleProfiles(t *testing.T) {
 	}
 }
 
-func TestInitCmdRepromptsWhenProfileVerificationFails(t *testing.T) {
+func TestInitCmdInheritsDefaultCredentialsForNamedProfiles(t *testing.T) {
 	dirs, home := setupInitTest(t)
 	keyPath := filepath.Join(home, "retry.key")
 	flagKeyPath = keyPath
@@ -207,13 +207,12 @@ func TestInitCmdRepromptsWhenProfileVerificationFails(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var goodServer *httptest.Server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/auth/token/lookup-self" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
 		token := r.Header.Get("X-Vault-Token")
-		if token != "default-token" && token != "good-token" {
+		if token != "default-token" {
 			w.WriteHeader(http.StatusForbidden)
 			_, _ = w.Write([]byte(`{"errors":["permission denied"]}`))
 			return
@@ -222,7 +221,6 @@ func TestInitCmdRepromptsWhenProfileVerificationFails(t *testing.T) {
 		_, _ = w.Write([]byte(`{"auth":{"lease_duration":1800}}`))
 	}))
 	defer server.Close()
-	goodServer = server
 
 	key, err := crypto.GenerateKey(keyPath)
 	if err != nil {
@@ -241,15 +239,8 @@ func TestInitCmdRepromptsWhenProfileVerificationFails(t *testing.T) {
 	promptCalls := 0
 	promptFn = func(label string, secret bool) (string, error) {
 		promptCalls++
-		switch {
-		case strings.Contains(label, "Vault address (work)"):
-			return goodServer.URL, nil
-		case strings.Contains(label, "Vault token (work)"):
-			return "good-token", nil
-		default:
-			t.Fatalf("unexpected prompt label: %s", label)
-			return "", nil
-		}
+		t.Fatalf("promptFn should not be called, got label %s", label)
+		return "", nil
 	}
 
 	cmd := initCmd()
@@ -258,16 +249,90 @@ func TestInitCmdRepromptsWhenProfileVerificationFails(t *testing.T) {
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("initCmd() error = %v", err)
 	}
-	if promptCalls != 2 {
-		t.Fatalf("promptFn calls = %d, want 2", promptCalls)
+	if promptCalls != 0 {
+		t.Fatalf("promptFn calls = %d, want 0", promptCalls)
 	}
 
 	loaded, err := vlt.LoadCredentialsForProfile(dirs, key, "work", "", "")
 	if err != nil {
 		t.Fatalf("LoadCredentialsForProfile(work) error = %v", err)
 	}
-	if loaded.Addr != goodServer.URL || loaded.Token != "good-token" {
-		t.Fatalf("work creds = %#v", loaded)
+	if loaded.Addr != server.URL || loaded.Token != "default-token" {
+		t.Fatalf("work creds = %#v, want inherited default creds", loaded)
+	}
+}
+
+func TestInitCmdConfiguresDefaultProfileBeforeNamedProfiles(t *testing.T) {
+	dirs, home := setupInitTest(t)
+	keyPath := filepath.Join(home, "order.key")
+	flagKeyPath = keyPath
+	flagVaultAddr = "http://127.0.0.1:8200"
+	flagVaultToken = "default-token"
+
+	cfgDir := filepath.Join(home, ".config", "vsync")
+	if err := os.MkdirAll(cfgDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.yaml"), []byte(`vault:
+  profiles:
+    zeta:
+      kv_version: 2
+    alpha:
+      kv_version: 2
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/auth/token/lookup-self" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if got := r.Header.Get("X-Vault-Token"); got != "default-token" {
+			t.Fatalf("unexpected token: %s", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"auth":{"lease_duration":1800}}`))
+	}))
+	defer server.Close()
+	flagVaultAddr = server.URL
+
+	key, err := crypto.GenerateKey(keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	origStoreDefault, origStoreProfile := storeCredentialsFn, storeProfileCredsFn
+	defer func() {
+		storeCredentialsFn = origStoreDefault
+		storeProfileCredsFn = origStoreProfile
+	}()
+	calls := make([]string, 0, 3)
+	storeCredentialsFn = func(_ *state.Dirs, _ []byte, addr, token string) error {
+		calls = append(calls, "default")
+		if addr != server.URL || token != "default-token" {
+			t.Fatalf("default creds = %q %q, want %q %q", addr, token, server.URL, "default-token")
+		}
+		return vlt.StoreCredentials(dirs, key, addr, token)
+	}
+	storeProfileCredsFn = func(_ *state.Dirs, _ []byte, profile, addr, token string) error {
+		calls = append(calls, profile)
+		if profile == "alpha" || profile == "zeta" {
+			if addr != server.URL || token != "default-token" {
+				t.Fatalf("%s creds = %q %q, want inherited default", profile, addr, token)
+			}
+			return vlt.StoreCredentialsForProfile(dirs, key, profile, addr, token)
+		}
+		return fmt.Errorf("unexpected profile %q", profile)
+	}
+
+	cmd := initCmd()
+	cmd.SilenceErrors = true
+	cmd.SilenceUsage = true
+	if err := cmd.ExecuteContext(context.Background()); err != nil {
+		t.Fatalf("initCmd() error = %v", err)
+	}
+	if got, want := strings.Join(calls, ","), "default,alpha,zeta"; got != want {
+		t.Fatalf("store order = %q, want %q", got, want)
 	}
 }
 

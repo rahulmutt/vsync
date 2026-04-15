@@ -155,8 +155,8 @@ func TestInitCmdUsesStoredDefaultAndProfileCredentials(t *testing.T) {
 	}
 	storeProfileCredsFn = func(_ *state.Dirs, _ []byte, profile, addr, token string) error {
 		profileCalled = true
-		if profile != "work" || addr != server.URL || token != "work-token" {
-			t.Fatalf("storeProfileCredsFn got %q %q %q, want work %q work-token", profile, addr, token, server.URL)
+		if profile != "work" || addr != server.URL || token != "default-token" {
+			t.Fatalf("storeProfileCredsFn got %q %q %q, want work %q default-token", profile, addr, token, server.URL)
 		}
 		return nil
 	}

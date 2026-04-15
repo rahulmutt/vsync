@@ -84,16 +84,8 @@ so vsync can connect to Vault without exposing credentials in plain text.`,
 				return err
 			}
 
-			profiles := make(map[string]struct{}, len(cfg.Vault.Profiles)+1)
-			profiles[defaultVaultProfileName] = struct{}{}
-			for name := range cfg.Vault.Profiles {
-				profiles[name] = struct{}{}
-			}
-			profileNames := make([]string, 0, len(profiles))
-			for name := range profiles {
-				profileNames = append(profileNames, name)
-			}
-			sort.Strings(profileNames)
+			profileNames := orderedInitProfileNames(cfg)
+			var defaultAddr, defaultToken string
 
 			for _, profileName := range profileNames {
 				label := profileName
@@ -108,7 +100,7 @@ so vsync can connect to Vault without exposing credentials in plain text.`,
 						return err
 					}
 
-					addr, token, err := resolveInitProfileCredentials(dirs, key, prof, profileName, label, promptOnly)
+					addr, token, err := resolveInitProfileCredentials(dirs, key, prof, profileName, label, promptOnly, defaultAddr, defaultToken)
 					if err != nil {
 						return err
 					}
@@ -133,6 +125,7 @@ so vsync can connect to Vault without exposing credentials in plain text.`,
 
 					fmt.Println("✓")
 					if profileName == defaultVaultProfileName {
+						defaultAddr, defaultToken = addr, token
 						if err := storeCredentialsFn(dirs, key, addr, token); err != nil {
 							return err
 						}
@@ -161,7 +154,7 @@ so vsync can connect to Vault without exposing credentials in plain text.`,
 	return cmd
 }
 
-func resolveInitProfileCredentials(dirs *state.Dirs, key []byte, prof config.VaultProfileConfig, profileName, label string, promptOnly bool) (string, string, error) {
+func resolveInitProfileCredentials(dirs *state.Dirs, key []byte, prof config.VaultProfileConfig, profileName, label string, promptOnly bool, inheritedAddr, inheritedToken string) (string, string, error) {
 	if promptOnly {
 		addr, err := promptFn(fmt.Sprintf("Vault address (%s): ", label), false)
 		if err != nil {
@@ -188,6 +181,8 @@ func resolveInitProfileCredentials(dirs *state.Dirs, key []byte, prof config.Vau
 		if v := resolveVaultAddrFn(); v != "" {
 			addr = v
 		}
+	} else if addr == "" && inheritedAddr != "" {
+		addr = inheritedAddr
 	}
 	if addr == "" {
 		if profileName == defaultVaultProfileName {
@@ -217,6 +212,8 @@ func resolveInitProfileCredentials(dirs *state.Dirs, key []byte, prof config.Vau
 		if v := resolveVaultTokenFn(); v != "" {
 			token = v
 		}
+	} else if token == "" && inheritedToken != "" {
+		token = inheritedToken
 	}
 	if token == "" {
 		if profileName == defaultVaultProfileName {
@@ -242,6 +239,23 @@ func resolveInitProfileCredentials(dirs *state.Dirs, key []byte, prof config.Vau
 	}
 
 	return addr, token, nil
+}
+
+func orderedInitProfileNames(cfg *config.Config) []string {
+	profileNames := make([]string, 0, len(cfg.Vault.Profiles)+1)
+	profileNames = append(profileNames, defaultVaultProfileName)
+	if len(cfg.Vault.Profiles) == 0 {
+		return profileNames
+	}
+	others := make([]string, 0, len(cfg.Vault.Profiles))
+	for name := range cfg.Vault.Profiles {
+		if name == defaultVaultProfileName {
+			continue
+		}
+		others = append(others, name)
+	}
+	sort.Strings(others)
+	return append(profileNames, others...)
 }
 
 func prompt(label string, secret bool) (string, error) {
