@@ -20,8 +20,9 @@ The canonical secret sources are Vault KV paths. Each configured secret referenc
 `--config` / `VSYNC_CONFIG` select a local override file. If omitted, `vsync` searches for `vsync.yaml` in the current directory and each parent directory. Global and local configs are merged top-to-bottom; nearer local config wins for overlapping entries.
 
 Merge identity:
+- env groups: `env_groups[*].name`
 - commands: `env.commands[*].name`
-- command variables: `env.commands[*].variables[*].name`
+- command variables: `env.commands[*].variables[*].name` or `group`
 - files: `files[*].key`
 
 ### Configuration model
@@ -52,19 +53,29 @@ vault:
       files_prefix: "secret/data/staging/files"
       kv_version: 1
 
+env_groups:
+  - name: common
+    variables:
+      - name: OPENAI_API_KEY
+        key: openai-api-key
+      - name: ANTHROPIC_API_KEY
+        key: anthropic-api-key
+
+  - name: prod-only
+    variables:
+      - name: GEMINI_API_KEY
+        key: gemini-api-key
+        profile: prod
+
 env:
   commands:
     - name: pi
       filter: 'args.exists(a, a == "--with-secrets")'
       variables:
-        - name: GEMINI_API_KEY
-          key: gemini-api-key
-          profile: prod
-        - name: OPENAI_API_KEY
-          key: openai-api-key
-          profile: staging
-        - name: ANTHROPIC_API_KEY
-          key: anthropic-api-key   # defaults to the env var name if omitted
+        - group: common
+        - group: prod-only
+        - name: LOCAL_API_KEY
+          key: local-api-key
 
 files:
   - path: ~/.pi/agent/auth.json
@@ -80,9 +91,14 @@ files:
 
 - `vault:` at the top level is the **default profile**.
 - `vault.profiles.<name>` defines additional profiles.
+- `env_groups` defines reusable bundles of environment variables.
+- Command variables can reference a group with `group: <name>`.
+- Groups may reference other groups, and nested expansion is validated for cycles.
+- Duplicate env var names inside the expanded result of any group or command are rejected as conflicts.
 - Each secret reference may include `profile: <name>`.
 - If `profile` is omitted, the default profile is used.
 - `env_prefix`, `files_prefix`, and `kv_version` default per profile if omitted.
+- Environment groups are expanded before execution; later variables in a command can override variables pulled in from a group.
 
 ### Command filters
 

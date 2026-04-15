@@ -507,6 +507,207 @@ files:
 	}
 }
 
+func TestLoadExpandsEnvGroupsAndReferences(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`env_groups:
+  - name: shared
+    variables:
+      - group: extra
+      - name: SHARED_API_KEY
+  - name: extra
+    variables:
+      - name: EXTRA_API_KEY
+        key: extra-api-key
+env:
+  commands:
+    - name: pi
+      variables:
+        - group: shared
+        - name: LOCAL_API_KEY
+          profile: prod
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got, want := len(cfg.EnvGroups), 2; got != want {
+		t.Fatalf("EnvGroups len = %d, want %d", got, want)
+	}
+	if got, want := cfg.EnvGroups[0].Variables, []VariableEntry{{Name: "EXTRA_API_KEY", Key: "extra-api-key"}, {Name: "SHARED_API_KEY", Key: "SHARED_API_KEY"}}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("EnvGroups[0].Variables = %#v, want %#v", got, want)
+	}
+	if got, want := cfg.EnvGroups[1].Variables, []VariableEntry{{Name: "EXTRA_API_KEY", Key: "extra-api-key"}}; len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("EnvGroups[1].Variables = %#v, want %#v", got, want)
+	}
+	pi := cfg.FindCommand("pi")
+	if pi == nil {
+		t.Fatal("FindCommand(pi) = nil")
+	}
+	want := []VariableEntry{{Name: "EXTRA_API_KEY", Key: "extra-api-key"}, {Name: "SHARED_API_KEY", Key: "SHARED_API_KEY"}, {Name: "LOCAL_API_KEY", Key: "LOCAL_API_KEY", Profile: "prod"}}
+	if len(pi.Variables) != len(want) {
+		t.Fatalf("pi variables len = %d, want %d (%#v)", len(pi.Variables), len(want), pi.Variables)
+	}
+	for i := range want {
+		if pi.Variables[i] != want[i] {
+			t.Fatalf("pi variables[%d] = %#v, want %#v", i, pi.Variables[i], want[i])
+		}
+	}
+}
+
+func TestLoadOrEmptyMergesEnvGroupsAndReferences(t *testing.T) {
+	basePath := filepath.Join(t.TempDir(), "base.yaml")
+	if err := os.WriteFile(basePath, []byte(`env_groups:
+  - name: shared
+    variables:
+      - name: BASE_API_KEY
+      - name: OVERRIDE_ME
+        key: base-override
+env:
+  commands:
+    - name: pi
+      variables:
+        - group: shared
+        - name: BASE_ONLY
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	overlayPath := filepath.Join(t.TempDir(), "overlay.yaml")
+	if err := os.WriteFile(overlayPath, []byte(`env_groups:
+  - name: shared
+    variables:
+      - name: CHILD_API_KEY
+      - name: OVERRIDE_ME
+        key: child-override
+env:
+  commands:
+    - name: pi
+      variables:
+        - name: CHILD_ONLY
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadOrEmpty(basePath, overlayPath)
+	if err != nil {
+		t.Fatalf("LoadOrEmpty() error = %v", err)
+	}
+	if got, want := len(cfg.EnvGroups), 1; got != want {
+		t.Fatalf("EnvGroups len = %d, want %d", got, want)
+	}
+	wantGroup := []VariableEntry{{Name: "BASE_API_KEY", Key: "BASE_API_KEY"}, {Name: "OVERRIDE_ME", Key: "child-override"}, {Name: "CHILD_API_KEY", Key: "CHILD_API_KEY"}}
+	if got := cfg.EnvGroups[0].Variables; len(got) != len(wantGroup) {
+		t.Fatalf("merged group vars len = %d, want %d (%#v)", len(got), len(wantGroup), got)
+	} else {
+		for i := range wantGroup {
+			if got[i] != wantGroup[i] {
+				t.Fatalf("merged group vars[%d] = %#v, want %#v", i, got[i], wantGroup[i])
+			}
+		}
+	}
+	pi := cfg.FindCommand("pi")
+	if pi == nil {
+		t.Fatal("FindCommand(pi) = nil")
+	}
+	wantCmd := []VariableEntry{{Name: "BASE_API_KEY", Key: "BASE_API_KEY"}, {Name: "OVERRIDE_ME", Key: "child-override"}, {Name: "CHILD_API_KEY", Key: "CHILD_API_KEY"}, {Name: "BASE_ONLY", Key: "BASE_ONLY"}, {Name: "CHILD_ONLY", Key: "CHILD_ONLY"}}
+	if got := pi.Variables; len(got) != len(wantCmd) {
+		t.Fatalf("merged command vars len = %d, want %d (%#v)", len(got), len(wantCmd), got)
+	} else {
+		for i := range wantCmd {
+			if got[i] != wantCmd[i] {
+				t.Fatalf("merged command vars[%d] = %#v, want %#v", i, got[i], wantCmd[i])
+			}
+		}
+	}
+}
+
+func TestLoadReportsUnknownEnvGroup(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`env:
+  commands:
+    - name: pi
+      variables:
+        - group: missing
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(cfgPath); err == nil || !strings.Contains(err.Error(), "env group \"missing\" not found") {
+		t.Fatalf("Load() error = %v, want missing group error", err)
+	}
+}
+
+func TestLoadReportsCyclicEnvGroup(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`env_groups:
+  - name: alpha
+    variables:
+      - group: beta
+  - name: beta
+    variables:
+      - group: alpha
+env:
+  commands:
+    - name: pi
+      variables:
+        - group: alpha
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(cfgPath); err == nil || !strings.Contains(err.Error(), "cyclic env group reference") {
+		t.Fatalf("Load() error = %v, want cyclic group error", err)
+	}
+}
+
+func TestLoadReportsConflictingEnvVars(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`env_groups:
+  - name: base
+    variables:
+      - name: SHARED_API_KEY
+        key: first-key
+  - name: override
+    variables:
+      - name: SHARED_API_KEY
+        key: second-key
+env:
+  commands:
+    - name: pi
+      variables:
+        - group: base
+        - group: override
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(cfgPath); err == nil || !strings.Contains(err.Error(), "duplicate env var \"SHARED_API_KEY\"") || !strings.Contains(err.Error(), "env group \"base\"") || !strings.Contains(err.Error(), "env group \"override\"") {
+		t.Fatalf("Load() error = %v, want duplicate env var error with group names", err)
+	}
+}
+
+func TestLoadReportsConflictingEnvVarsBetweenGroupAndCommand(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`env_groups:
+  - name: shared
+    variables:
+      - name: SHARED_API_KEY
+        key: group-key
+env:
+  commands:
+    - name: pi
+      variables:
+        - group: shared
+        - name: SHARED_API_KEY
+          key: command-key
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(cfgPath); err == nil || !strings.Contains(err.Error(), "duplicate env var \"SHARED_API_KEY\"") || !strings.Contains(err.Error(), "env group \"shared\"") || !strings.Contains(err.Error(), "env command \"pi\"") {
+		t.Fatalf("Load() error = %v, want duplicate env var error with source names", err)
+	}
+}
+
 func TestVaultProfileDefaultAndMissing(t *testing.T) {
 	cfg := &Config{Vault: VaultConfig{VaultProfileConfig: VaultProfileConfig{Addr: "http://default:8200"}, Profiles: map[string]VaultProfileConfig{"prod": {Addr: "http://prod:8200"}}}}
 	if got, err := cfg.VaultProfile(""); err != nil || got.Addr != "http://default:8200" {

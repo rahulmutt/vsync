@@ -33,9 +33,10 @@ func DefaultConfigPath() (string, error) {
 
 // Config is the top-level vsync configuration.
 type Config struct {
-	Vault VaultConfig `yaml:"vault"`
-	Env   EnvConfig   `yaml:"env"`
-	Files []FileEntry `yaml:"files"`
+	Vault     VaultConfig     `yaml:"vault"`
+	EnvGroups []EnvGroupEntry `yaml:"env_groups"`
+	Env       EnvConfig       `yaml:"env"`
+	Files     []FileEntry     `yaml:"files"`
 }
 
 // VaultProfileConfig holds the settings for a single vault profile.
@@ -53,6 +54,12 @@ type VaultConfig struct {
 	Profiles           map[string]VaultProfileConfig `yaml:"profiles"`
 }
 
+// EnvGroupEntry defines a reusable group of environment variables.
+type EnvGroupEntry struct {
+	Name      string          `yaml:"name"`
+	Variables []VariableEntry `yaml:"variables"`
+}
+
 // EnvConfig holds per-command environment variable injection config.
 type EnvConfig struct {
 	Commands []CommandEntry `yaml:"commands"`
@@ -65,12 +72,14 @@ type CommandEntry struct {
 	Variables []VariableEntry `yaml:"variables"`
 }
 
-// VariableEntry maps an env var name to a vault key.
+// VariableEntry maps an env var name to a vault key, or references a named group.
 // If Key is omitted, it defaults to Name.
+// If Group is set, Name/Key/Profile must be omitted and the group is expanded.
 type VariableEntry struct {
 	Name    string `yaml:"name"`    // env var name, e.g. GEMINI_API_KEY
 	Key     string `yaml:"key"`     // vault key, e.g. gemini-api-key
 	Profile string `yaml:"profile"` // vault profile to use (default if omitted)
+	Group   string `yaml:"group"`   // reference to env_groups entry
 }
 
 // FileEntry maps a local path to a vault key.
@@ -84,9 +93,16 @@ type FileEntry struct {
 // defaults fills in zero values with sensible defaults.
 func (c *Config) defaults() {
 	c.Vault.defaults()
+	for i := range c.EnvGroups {
+		for j := range c.EnvGroups[i].Variables {
+			if c.EnvGroups[i].Variables[j].Group == "" && c.EnvGroups[i].Variables[j].Key == "" {
+				c.EnvGroups[i].Variables[j].Key = c.EnvGroups[i].Variables[j].Name
+			}
+		}
+	}
 	for i := range c.Env.Commands {
 		for j := range c.Env.Commands[i].Variables {
-			if c.Env.Commands[i].Variables[j].Key == "" {
+			if c.Env.Commands[i].Variables[j].Group == "" && c.Env.Commands[i].Variables[j].Key == "" {
 				c.Env.Commands[i].Variables[j].Key = c.Env.Commands[i].Variables[j].Name
 			}
 		}
@@ -125,6 +141,9 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	cfg.defaults()
+	if err := cfg.resolveEnvGroups(); err != nil {
+		return nil, err
+	}
 	return cfg, nil
 }
 
@@ -145,6 +164,9 @@ func LoadOrEmpty(globalPath, overridePath string) (*Config, error) {
 		mergeConfig(cfg, src)
 	}
 	cfg.defaults()
+	if err := cfg.resolveEnvGroups(); err != nil {
+		return nil, err
+	}
 	return cfg, nil
 }
 
@@ -260,6 +282,7 @@ func mergeConfig(dst, src *Config) {
 		return
 	}
 	dst.Vault.merge(src.Vault)
+	dst.EnvGroups = mergeEnvGroups(dst.EnvGroups, src.EnvGroups)
 	dst.Env.Commands = mergeCommands(dst.Env.Commands, src.Env.Commands)
 	dst.Files = mergeFiles(dst.Files, src.Files)
 }
@@ -326,17 +349,39 @@ func mergeCommand(base, overlay CommandEntry) CommandEntry {
 	return base
 }
 
-func mergeVariables(base []VariableEntry, overlay []VariableEntry) []VariableEntry {
+func mergeEnvGroups(base []EnvGroupEntry, overlay []EnvGroupEntry) []EnvGroupEntry {
 	index := make(map[string]int, len(base))
 	for i := range base {
 		index[base[i].Name] = i
 	}
+	for _, group := range overlay {
+		if i, ok := index[group.Name]; ok {
+			base[i] = mergeEnvGroup(base[i], group)
+			continue
+		}
+		index[group.Name] = len(base)
+		base = append(base, group)
+	}
+	return base
+}
+
+func mergeEnvGroup(base, overlay EnvGroupEntry) EnvGroupEntry {
+	base.Variables = mergeVariables(base.Variables, overlay.Variables)
+	return base
+}
+
+func mergeVariables(base []VariableEntry, overlay []VariableEntry) []VariableEntry {
+	index := make(map[string]int, len(base))
+	for i := range base {
+		index[variableIdentity(base[i])] = i
+	}
 	for _, v := range overlay {
-		if i, ok := index[v.Name]; ok {
+		key := variableIdentity(v)
+		if i, ok := index[key]; ok {
 			base[i] = v
 			continue
 		}
-		index[v.Name] = len(base)
+		index[key] = len(base)
 		base = append(base, v)
 	}
 	return base
@@ -356,6 +401,106 @@ func mergeFiles(base []FileEntry, overlay []FileEntry) []FileEntry {
 		base = append(base, f)
 	}
 	return base
+}
+
+type seenVariable struct {
+	entry  VariableEntry
+	source string
+}
+
+func (c *Config) resolveEnvGroups() error {
+	groups := make(map[string]EnvGroupEntry, len(c.EnvGroups))
+	for _, group := range c.EnvGroups {
+		if group.Name == "" {
+			return fmt.Errorf("env group name is required")
+		}
+		groups[group.Name] = group
+	}
+
+	resolvedGroups := make([]EnvGroupEntry, len(c.EnvGroups))
+	for i, group := range c.EnvGroups {
+		vars, err := expandVariables(group.Variables, groups, map[string]bool{}, map[string]seenVariable{}, fmt.Sprintf("env group %q", group.Name))
+		if err != nil {
+			return err
+		}
+		group.Variables = vars
+		resolvedGroups[i] = group
+	}
+	c.EnvGroups = resolvedGroups
+
+	for i := range c.Env.Commands {
+		vars, err := expandVariables(c.Env.Commands[i].Variables, groups, map[string]bool{}, map[string]seenVariable{}, fmt.Sprintf("env command %q", c.Env.Commands[i].Name))
+		if err != nil {
+			return err
+		}
+		c.Env.Commands[i].Variables = vars
+	}
+	return nil
+}
+
+func expandVariables(vars []VariableEntry, groups map[string]EnvGroupEntry, stack map[string]bool, seen map[string]seenVariable, scope string) ([]VariableEntry, error) {
+	var out []VariableEntry
+	for _, v := range vars {
+		if v.Group != "" {
+			if v.Name != "" || v.Key != "" || v.Profile != "" {
+				return nil, fmt.Errorf("%s: group reference %q must not set name, key, or profile", scope, v.Group)
+			}
+			groupScope := fmt.Sprintf("env group %q", v.Group)
+			groupVars, err := expandGroup(v.Group, groups, stack, seen, groupScope)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, groupVars...)
+			continue
+		}
+		if v.Name == "" {
+			return nil, fmt.Errorf("%s: env variable name is required", scope)
+		}
+		if existing, ok := seen[v.Name]; ok {
+			return nil, fmt.Errorf("%s: duplicate env var %q (%s) conflicts with %s", scope, v.Name, describeVariable(v), describeVariableSource(existing))
+		}
+		seen[v.Name] = seenVariable{entry: v, source: scope}
+		out = append(out, v)
+	}
+	return out, nil
+}
+
+func expandGroup(name string, groups map[string]EnvGroupEntry, stack map[string]bool, seen map[string]seenVariable, scope string) ([]VariableEntry, error) {
+	group, ok := groups[name]
+	if !ok {
+		return nil, fmt.Errorf("%s: env group %q not found", scope, name)
+	}
+	if stack[name] {
+		return nil, fmt.Errorf("%s: cyclic env group reference %q", scope, name)
+	}
+	stack[name] = true
+	defer delete(stack, name)
+	return expandVariables(group.Variables, groups, stack, seen, scope)
+}
+
+func describeVariable(v VariableEntry) string {
+	desc := fmt.Sprintf("name=%q", v.Name)
+	if v.Group != "" {
+		desc += fmt.Sprintf(", group=%q", v.Group)
+	}
+	if v.Key != "" {
+		desc += fmt.Sprintf(", key=%q", v.Key)
+	}
+	if v.Profile != "" {
+		desc += fmt.Sprintf(", profile=%q", v.Profile)
+	}
+	return desc
+}
+
+func describeVariableSource(v seenVariable) string {
+	return fmt.Sprintf("%s (%s)", v.source, describeVariable(v.entry))
+}
+
+func variableIdentity(v VariableEntry) string {
+	if v.Group != "" {
+		return "group:" + v.Group
+	}
+	return "var:" + v.Name
 }
 
 func expandHome(path, home string) string {

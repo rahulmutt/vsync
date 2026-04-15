@@ -6,6 +6,7 @@ It stores Vault credentials encrypted on disk, launches a shell with command shi
 ## Highlights
 
 - multiple Vault profiles with independent addresses, tokens, prefixes, and KV versions
+- reusable `env_groups` for shared command variable bundles
 - per-secret `profile:` selection in config
 - encrypted on-disk cache with Vault TTL awareness
 - automatic file syncing on shell entry
@@ -51,16 +52,29 @@ vault:
       files_prefix: "secret/data/prod/files"
       kv_version: 2
 
+env_groups:
+  - name: common
+    variables:
+      - name: OPENAI_API_KEY
+        key: openai-api-key
+      - name: ANTHROPIC_API_KEY
+        key: anthropic-api-key
+
+  - name: prod-only
+    variables:
+      - name: GEMINI_API_KEY
+        key: gemini-api-key
+        profile: prod
+
 env:
   commands:
     - name: pi
       filter: 'args.exists(a, a == "--with-secrets")'
       variables:
-        - name: GEMINI_API_KEY
-          key: gemini-api-key
-          profile: prod
-        - name: OPENAI_API_KEY
-          key: openai-api-key
+        - group: common
+        - group: prod-only
+        - name: LOCAL_API_KEY
+          key: local-api-key
 
 files:
   - path: ~/.pi/agent/auth.json
@@ -121,15 +135,28 @@ vault:
       files_prefix: "secret/data/prod/files"
       kv_version: 2
 
+env_groups:
+  - name: common
+    variables:
+      - name: OPENAI_API_KEY
+        key: openai-api-key
+      - name: ANTHROPIC_API_KEY
+        key: anthropic-api-key
+
+  - name: prod-only
+    variables:
+      - name: GEMINI_API_KEY
+        key: gemini-api-key
+        profile: prod
+
 env:
   commands:
     - name: pi
       variables:
-        - name: GEMINI_API_KEY
-          key: gemini-api-key
-          profile: prod
-        - name: ANTHROPIC_API_KEY
-          key: anthropic-api-key
+        - group: common
+        - group: prod-only
+        - name: LOCAL_API_KEY
+          key: local-api-key
 
 files:
   - path: ~/.pi/agent/auth.json
@@ -142,9 +169,14 @@ files:
 
 - The top-level `vault:` block is the default profile.
 - Additional profiles live under `vault.profiles`.
+- `env_groups` defines reusable bundles of environment variables.
+- Each command variable may either declare a variable directly or reference a group with `group: <name>`.
+- Groups may reference other groups, and nested expansion is checked for cycles.
+- Duplicate env var names in the expanded result of a group or command are rejected.
 - Each secret reference can set `profile: <name>`.
 - If `profile` is omitted, the default profile is used.
 - `env_prefix`, `files_prefix`, and `kv_version` default per profile if omitted.
+- Groups are expanded in order, so later variables in a command can override variables injected from a group.
 
 ### Command filters
 
