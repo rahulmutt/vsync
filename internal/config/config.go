@@ -32,11 +32,18 @@ func DefaultConfigPath() (string, error) {
 }
 
 // Config is the top-level vsync configuration.
+// Defaults are file-local and are applied to entries in that file before merging.
 type Config struct {
+	Defaults  ConfigDefaults  `yaml:"defaults"`
 	Vault     VaultConfig     `yaml:"vault"`
 	EnvGroups []EnvGroupEntry `yaml:"env_groups"`
 	Env       EnvConfig       `yaml:"env"`
 	Files     []FileEntry     `yaml:"files"`
+}
+
+// ConfigDefaults holds file-local defaults that are applied before merging.
+type ConfigDefaults struct {
+	Profile string `yaml:"profile"`
 }
 
 // VaultProfileConfig holds the settings for a single vault profile.
@@ -78,7 +85,7 @@ type CommandEntry struct {
 type VariableEntry struct {
 	Name    string `yaml:"name"`    // env var name, e.g. GEMINI_API_KEY
 	Key     string `yaml:"key"`     // vault key, e.g. gemini-api-key
-	Profile string `yaml:"profile"` // vault profile to use (default if omitted)
+	Profile string `yaml:"profile"` // vault profile to use (defaults.profile or default if omitted)
 	Group   string `yaml:"group"`   // reference to env_groups entry
 }
 
@@ -87,7 +94,7 @@ type FileEntry struct {
 	Path    string `yaml:"path"`    // local file path (~ expanded)
 	Key     string `yaml:"key"`     // vault key, e.g. pi-agent-auth
 	Mode    string `yaml:"mode"`    // file permission, default "0600"
-	Profile string `yaml:"profile"` // vault profile to use (default if omitted)
+	Profile string `yaml:"profile"` // vault profile to use (defaults.profile or default if omitted)
 }
 
 // defaults fills in zero values with sensible defaults.
@@ -110,6 +117,32 @@ func (c *Config) defaults() {
 	for i := range c.Files {
 		if c.Files[i].Mode == "" {
 			c.Files[i].Mode = "0600"
+		}
+	}
+}
+
+// applyFileDefaults applies file-local defaults to vault key references in this file.
+func (c *Config) applyFileDefaults() {
+	if c.Defaults.Profile == "" {
+		return
+	}
+	for i := range c.EnvGroups {
+		for j := range c.EnvGroups[i].Variables {
+			if c.EnvGroups[i].Variables[j].Group == "" && c.EnvGroups[i].Variables[j].Profile == "" {
+				c.EnvGroups[i].Variables[j].Profile = c.Defaults.Profile
+			}
+		}
+	}
+	for i := range c.Env.Commands {
+		for j := range c.Env.Commands[i].Variables {
+			if c.Env.Commands[i].Variables[j].Group == "" && c.Env.Commands[i].Variables[j].Profile == "" {
+				c.Env.Commands[i].Variables[j].Profile = c.Defaults.Profile
+			}
+		}
+	}
+	for i := range c.Files {
+		if c.Files[i].Profile == "" {
+			c.Files[i].Profile = c.Defaults.Profile
 		}
 	}
 }
@@ -151,8 +184,10 @@ func Load(path string) (*Config, error) {
 }
 
 // LoadOrEmpty loads the global config file plus any local override config,
-// merging them from top to bottom. If overridePath is empty, it searches for
-// vsync.yaml in the current directory and its parents. Missing files are ignored.
+// merging them from top to bottom. File-local defaults are applied before merge
+// so they affect only entries from that file, not the merged defaults state.
+// If overridePath is empty, it searches for vsync.yaml in the current directory
+// and its parents. Missing files are ignored.
 func LoadOrEmpty(globalPath, overridePath string) (*Config, error) {
 	paths, err := configPaths(globalPath, overridePath)
 	if err != nil {
@@ -218,6 +253,7 @@ func loadFile(path string) (*Config, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", path, err)
 	}
+	cfg.applyFileDefaults()
 	return &cfg, nil
 }
 

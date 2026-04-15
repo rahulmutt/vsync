@@ -28,6 +28,10 @@ Merge identity:
 ### Configuration model
 
 ```yaml
+defaults:
+  # file-local default profile for vault key references in this file
+  profile: prod
+
 vault:
   # default profile (used when a secret reference omits profile)
   env_prefix: "secret/data/vsync/env"
@@ -96,7 +100,9 @@ files:
 - Groups may reference other groups, and nested expansion is validated for cycles.
 - Duplicate env var names inside the expanded result of any group or command are rejected as conflicts.
 - Each secret reference may include `profile: <name>`.
-- If `profile` is omitted, the default profile is used.
+- If `defaults.profile` is set in a file, it becomes the default profile for all vault key references in that file.
+- If `profile` is omitted and no file-local default is set, the default profile is used.
+- File-local `defaults` are applied before merging configs and are not merged themselves.
 - Additional profiles inherit from the default profile; any omitted `env_prefix`, `files_prefix`, or `kv_version` falls back to the default profile's value (which itself falls back to built-in defaults).
 - Environment groups are expanded before execution; later variables in a command can override variables pulled in from a group.
 

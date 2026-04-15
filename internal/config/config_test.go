@@ -441,7 +441,9 @@ func TestFindCommand(t *testing.T) {
 
 func TestLoadSupportsProfilesAndReferenceProfiles(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
-	if err := os.WriteFile(cfgPath, []byte(`vault:
+	if err := os.WriteFile(cfgPath, []byte(`defaults:
+  profile: prod
+vault:
   addr: http://default:8200
   token: default-token
   env_prefix: default/env
@@ -457,11 +459,9 @@ env:
       variables:
         - name: GEMINI_API_KEY
           key: gemini
-          profile: prod
 files:
   - path: ~/prod.json
     key: prod-file
-    profile: prod
 `), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -499,6 +499,63 @@ files:
 	}
 	if _, err := cfg.VaultProfile("missing"); err == nil {
 		t.Fatal("VaultProfile(missing) error = nil, want error")
+	}
+}
+
+func TestLoadAppliesFileDefaultsToEnvGroupsAndFiles(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`defaults:
+  profile: staging
+env_groups:
+  - name: shared
+    variables:
+      - name: GROUP_API_KEY
+      - name: OVERRIDE_ME
+        profile: prod
+env:
+  commands:
+    - name: pi
+      variables:
+        - group: shared
+        - name: COMMAND_API_KEY
+files:
+  - path: ~/shared.txt
+    key: shared-file
+  - path: ~/explicit.txt
+    key: explicit-file
+    profile: prod
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got, want := cfg.EnvGroups[0].Variables[0].Profile, "staging"; got != want {
+		t.Fatalf("group default profile = %q, want %q", got, want)
+	}
+	if got, want := cfg.EnvGroups[0].Variables[1].Profile, "prod"; got != want {
+		t.Fatalf("group explicit profile = %q, want %q", got, want)
+	}
+	pi := cfg.FindCommand("pi")
+	if pi == nil {
+		t.Fatal("FindCommand(pi) = nil")
+	}
+	wantProfiles := []string{"staging", "prod", "staging"}
+	if len(pi.Variables) != len(wantProfiles) {
+		t.Fatalf("pi variables len = %d, want %d", len(pi.Variables), len(wantProfiles))
+	}
+	for i, want := range wantProfiles {
+		if got := pi.Variables[i].Profile; got != want {
+			t.Fatalf("pi variable[%d] profile = %q, want %q", i, got, want)
+		}
+	}
+	if got, want := cfg.Files[0].Profile, "staging"; got != want {
+		t.Fatalf("file default profile = %q, want %q", got, want)
+	}
+	if got, want := cfg.Files[1].Profile, "prod"; got != want {
+		t.Fatalf("file explicit profile = %q, want %q", got, want)
 	}
 }
 
@@ -554,7 +611,9 @@ env:
 
 func TestLoadOrEmptyMergesEnvGroupsAndReferences(t *testing.T) {
 	basePath := filepath.Join(t.TempDir(), "base.yaml")
-	if err := os.WriteFile(basePath, []byte(`env_groups:
+	if err := os.WriteFile(basePath, []byte(`defaults:
+  profile: prod
+env_groups:
   - name: shared
     variables:
       - name: BASE_API_KEY
@@ -566,12 +625,17 @@ env:
       variables:
         - group: shared
         - name: BASE_ONLY
+files:
+  - path: ~/base.txt
+    key: shared-file
 `), 0600); err != nil {
 		t.Fatal(err)
 	}
 
 	overlayPath := filepath.Join(t.TempDir(), "overlay.yaml")
-	if err := os.WriteFile(overlayPath, []byte(`env_groups:
+	if err := os.WriteFile(overlayPath, []byte(`defaults:
+  profile: staging
+env_groups:
   - name: shared
     variables:
       - name: CHILD_API_KEY
@@ -582,6 +646,9 @@ env:
     - name: pi
       variables:
         - name: CHILD_ONLY
+files:
+  - path: ~/overlay.txt
+    key: overlay-file
 `), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -590,10 +657,13 @@ env:
 	if err != nil {
 		t.Fatalf("LoadOrEmpty() error = %v", err)
 	}
+	if got, want := cfg.Defaults.Profile, ""; got != want {
+		t.Fatalf("merged defaults profile = %q, want %q", got, want)
+	}
 	if got, want := len(cfg.EnvGroups), 1; got != want {
 		t.Fatalf("EnvGroups len = %d, want %d", got, want)
 	}
-	wantGroup := []VariableEntry{{Name: "BASE_API_KEY", Key: "BASE_API_KEY"}, {Name: "OVERRIDE_ME", Key: "child-override"}, {Name: "CHILD_API_KEY", Key: "CHILD_API_KEY"}}
+	wantGroup := []VariableEntry{{Name: "BASE_API_KEY", Key: "BASE_API_KEY", Profile: "prod"}, {Name: "OVERRIDE_ME", Key: "child-override", Profile: "staging"}, {Name: "CHILD_API_KEY", Key: "CHILD_API_KEY", Profile: "staging"}}
 	if got := cfg.EnvGroups[0].Variables; len(got) != len(wantGroup) {
 		t.Fatalf("merged group vars len = %d, want %d (%#v)", len(got), len(wantGroup), got)
 	} else {
@@ -607,7 +677,7 @@ env:
 	if pi == nil {
 		t.Fatal("FindCommand(pi) = nil")
 	}
-	wantCmd := []VariableEntry{{Name: "BASE_API_KEY", Key: "BASE_API_KEY"}, {Name: "OVERRIDE_ME", Key: "child-override"}, {Name: "CHILD_API_KEY", Key: "CHILD_API_KEY"}, {Name: "BASE_ONLY", Key: "BASE_ONLY"}, {Name: "CHILD_ONLY", Key: "CHILD_ONLY"}}
+	wantCmd := []VariableEntry{{Name: "BASE_API_KEY", Key: "BASE_API_KEY", Profile: "prod"}, {Name: "OVERRIDE_ME", Key: "child-override", Profile: "staging"}, {Name: "CHILD_API_KEY", Key: "CHILD_API_KEY", Profile: "staging"}, {Name: "BASE_ONLY", Key: "BASE_ONLY", Profile: "prod"}, {Name: "CHILD_ONLY", Key: "CHILD_ONLY", Profile: "staging"}}
 	if got := pi.Variables; len(got) != len(wantCmd) {
 		t.Fatalf("merged command vars len = %d, want %d (%#v)", len(got), len(wantCmd), got)
 	} else {
@@ -616,6 +686,15 @@ env:
 				t.Fatalf("merged command vars[%d] = %#v, want %#v", i, got[i], wantCmd[i])
 			}
 		}
+	}
+	if got, want := len(cfg.Files), 2; got != want {
+		t.Fatalf("files len = %d, want %d", got, want)
+	}
+	if got, want := cfg.Files[0].Profile, "prod"; got != want {
+		t.Fatalf("base file profile = %q, want %q", got, want)
+	}
+	if got, want := cfg.Files[1].Profile, "staging"; got != want {
+		t.Fatalf("overlay file profile = %q, want %q", got, want)
 	}
 }
 
