@@ -842,3 +842,66 @@ func TestMergeProfilesAndVaultProfileMerge(t *testing.T) {
 		t.Fatalf("mergeVaultProfile() = %#v", merged)
 	}
 }
+
+func TestLoadOrEmptyAndResolveEnvGroupsErrorPaths(t *testing.T) {
+	base := t.TempDir()
+	valid := filepath.Join(base, "valid.yaml")
+	invalidGroupName := filepath.Join(base, "invalid-group-name.yaml")
+	invalidVarName := filepath.Join(base, "invalid-var-name.yaml")
+	invalidGroupRef := filepath.Join(base, "invalid-group-ref.yaml")
+
+	if err := os.WriteFile(valid, []byte(`env_groups:
+  - name: shared
+    variables:
+      - name: SHARED_API_KEY
+        key: shared-key
+env:
+  commands:
+    - name: pi
+      variables:
+        - group: shared
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(invalidGroupName, []byte(`env_groups:
+  - variables:
+      - name: BROKEN
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(invalidVarName, []byte(`env:
+  commands:
+    - name: pi
+      variables:
+        - key: missing-name
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(invalidGroupRef, []byte(`env:
+  commands:
+    - name: pi
+      variables:
+        - group: shared
+          name: not-allowed
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := LoadOrEmpty(valid, ""); err != nil {
+		t.Fatalf("LoadOrEmpty(valid) error = %v", err)
+	}
+
+	if _, err := LoadOrEmpty(invalidGroupName, ""); err == nil || !strings.Contains(err.Error(), "env group name is required") {
+		t.Fatalf("LoadOrEmpty(invalid group name) error = %v, want env group name is required", err)
+	}
+	if _, err := LoadOrEmpty(invalidVarName, ""); err == nil || !strings.Contains(err.Error(), "env variable name is required") {
+		t.Fatalf("LoadOrEmpty(invalid var name) error = %v, want env variable name is required", err)
+	}
+	if _, err := LoadOrEmpty(invalidGroupRef, ""); err == nil || !strings.Contains(err.Error(), "must not set name, key, or profile") {
+		t.Fatalf("LoadOrEmpty(invalid group ref) error = %v, want group reference validation", err)
+	}
+
+	if got := describeVariable(VariableEntry{Name: "API_KEY", Group: "shared", Key: "shared-key", Profile: "prod"}); !strings.Contains(got, "name=\"API_KEY\"") || !strings.Contains(got, "group=\"shared\"") || !strings.Contains(got, "key=\"shared-key\"") || !strings.Contains(got, "profile=\"prod\"") {
+		t.Fatalf("describeVariable() = %q, want all fields", got)
+	}
+}
